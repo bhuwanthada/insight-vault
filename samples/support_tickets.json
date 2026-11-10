@@ -1,0 +1,383 @@
+[
+  {
+    "id": "S-001",
+    "subject": "Cannot log in after password change",
+    "description": "User says login fails after changing password; locked out of the account.",
+    "resolution": "Reset the password and cleared cache; confirmed login works.",
+    "agent": "Asha",
+    "tools_used": [
+      "admin console",
+      "audit log"
+    ],
+    "daysAgo": 2,
+    "hoursToResolve": 1.5
+  },
+  {
+    "id": "S-002",
+    "subject": "SSO login loop",
+    "description": "Authentication redirects back to the login page; SSO and MFA prompt never completes.",
+    "resolution": "Reset MFA credentials and updated the SSO configuration settings.",
+    "agent": "Ravi",
+    "tools_used": [
+      "admin console",
+      "idp dashboard"
+    ],
+    "daysAgo": 5,
+    "hoursToResolve": 3.0
+  },
+  {
+    "id": "S-003",
+    "subject": "Locked out of workspace",
+    "description": "Several staff are locked out; access denied after permission change.",
+    "resolution": "Reset the password for the admin and restored permission group.",
+    "agent": "Asha",
+    "tools_used": [
+      "admin console"
+    ],
+    "daysAgo": 9,
+    "hoursToResolve": 2.0
+  },
+  {
+    "id": "S-004",
+    "subject": "2FA codes rejected",
+    "description": "Authentication codes are rejected, cannot log in from new phone.",
+    "resolution": "Reset 2FA and verified login.",
+    "agent": "Meera",
+    "tools_used": [
+      "admin console",
+      "audit log"
+    ],
+    "daysAgo": 20,
+    "hoursToResolve": 1.0
+  },
+  {
+    "id": "S-005",
+    "subject": "Dashboard is very slow",
+    "description": "Dashboard loading is slow with high latency; pages timed out during peak.",
+    "resolution": "Restarted the reporting service and cleared the cache; latency back to normal.",
+    "agent": "Ravi",
+    "tools_used": [
+      "grafana",
+      "ssh"
+    ],
+    "daysAgo": 3,
+    "hoursToResolve": 4.0
+  },
+  {
+    "id": "S-006",
+    "subject": "Export times out",
+    "description": "CSV export times out and the page hangs; performance is poor.",
+    "resolution": "Applied a hotfix to the export job and restarted the worker.",
+    "agent": "Meera",
+    "tools_used": [
+      "grafana",
+      "log viewer"
+    ],
+    "daysAgo": 11,
+    "hoursToResolve": 6.0
+  },
+  {
+    "id": "S-007",
+    "subject": "App lag on large projects",
+    "description": "Severe lag and slow loading when opening large projects.",
+    "resolution": "Escalated to engineering; patch released that fixed the query performance.",
+    "agent": "Ravi",
+    "tools_used": [
+      "grafana",
+      "jira"
+    ],
+    "daysAgo": 26,
+    "hoursToResolve": 30.0
+  },
+  {
+    "id": "S-008",
+    "subject": "Charged twice for subscription",
+    "description": "Customer was charged twice; billing shows duplicate invoice and payment.",
+    "resolution": "Issued a refund for the duplicate charge and credited the next invoice.",
+    "agent": "Priya",
+    "tools_used": [
+      "billing portal",
+      "stripe dashboard"
+    ],
+    "daysAgo": 4,
+    "hoursToResolve": 2.5
+  },
+  {
+    "id": "S-009",
+    "subject": "Invoice shows wrong VAT",
+    "description": "Invoice has wrong tax on billing statement; payment blocked.",
+    "resolution": "Corrected the invoice and issued a credit note.",
+    "agent": "Priya",
+    "tools_used": [
+      "billing portal"
+    ],
+    "daysAgo": 14,
+    "hoursToResolve": 5.0
+  },
+  {
+    "id": "S-010",
+    "subject": "Refund not received",
+    "description": "Refund for cancelled subscription never arrived; payment still pending.",
+    "resolution": "Re-issued the refund through the payment provider.",
+    "agent": "Priya",
+    "tools_used": [
+      "stripe dashboard",
+      "billing portal"
+    ],
+    "daysAgo": 33,
+    "hoursToResolve": 8.0
+  },
+  {
+    "id": "S-011",
+    "subject": "Credit card declined on renewal",
+    "description": "Credit card payment declined at subscription renewal; billing page errors.",
+    "resolution": "Updated payment method and retried the charge; refund of late fee issued.",
+    "agent": "Asha",
+    "tools_used": [
+      "billing portal"
+    ],
+    "daysAgo": 47,
+    "hoursToResolve": 3.0
+  },
+  {
+    "id": "S-012",
+    "subject": "Contacts missing after import",
+    "description": "CSV import dropped rows; missing data and duplicate contacts after migration.",
+    "resolution": "Re-synced the data from the source file and removed duplicates.",
+    "agent": "Meera",
+    "tools_used": [
+      "import tool",
+      "database console"
+    ],
+    "daysAgo": 6,
+    "hoursToResolve": 5.5
+  },
+  {
+    "id": "S-013",
+    "subject": "Calendar sync stuck",
+    "description": "Sync has stopped; data not updating between calendar and app.",
+    "resolution": "Re-synced the account and restarted the sync worker.",
+    "agent": "Ravi",
+    "tools_used": [
+      "admin console",
+      "log viewer"
+    ],
+    "daysAgo": 16,
+    "hoursToResolve": 2.0
+  },
+  {
+    "id": "S-014",
+    "subject": "Duplicate records after migration",
+    "description": "Migration created duplicate records, sync conflicts everywhere.",
+    "resolution": "Rolled back the migration and re-ran the import with dedupe enabled.",
+    "agent": "Meera",
+    "tools_used": [
+      "database console",
+      "import tool"
+    ],
+    "daysAgo": 41,
+    "hoursToResolve": 12.0
+  },
+  {
+    "id": "S-015",
+    "subject": "App crashes on startup",
+    "description": "Application crash on launch with an error and blank screen.",
+    "resolution": "Reinstalled the application and cleared the cache; crash no longer reproduces.",
+    "agent": "Asha",
+    "tools_used": [
+      "remote desktop",
+      "log viewer"
+    ],
+    "daysAgo": 1,
+    "hoursToResolve": 1.0
+  },
+  {
+    "id": "S-016",
+    "subject": "500 error saving report",
+    "description": "Saving a report returns a 500 error with a stack trace.",
+    "resolution": "Rolled back the latest release and applied a hotfix.",
+    "agent": "Ravi",
+    "tools_used": [
+      "log viewer",
+      "ssh",
+      "jira"
+    ],
+    "daysAgo": 8,
+    "hoursToResolve": 7.0
+  },
+  {
+    "id": "S-017",
+    "subject": "Editor freezes",
+    "description": "The editor freezes then shows an error exception.",
+    "resolution": "Applied a patch and asked customer to reinstall the desktop client.",
+    "agent": "Meera",
+    "tools_used": [
+      "remote desktop"
+    ],
+    "daysAgo": 22,
+    "hoursToResolve": 4.5
+  },
+  {
+    "id": "S-018",
+    "subject": "Web app blank screen",
+    "description": "Blank screen after login, console shows exception and error.",
+    "resolution": "Cleared cache and restarted the web service.",
+    "agent": "Asha",
+    "tools_used": [
+      "log viewer"
+    ],
+    "daysAgo": 58,
+    "hoursToResolve": 2.0
+  },
+  {
+    "id": "S-019",
+    "subject": "Webhook not firing",
+    "description": "Webhook integration stopped delivering events; API returns errors.",
+    "resolution": "Regenerated the API token and updated the webhook configuration.",
+    "agent": "Ravi",
+    "tools_used": [
+      "api explorer",
+      "log viewer"
+    ],
+    "daysAgo": 7,
+    "hoursToResolve": 3.5
+  },
+  {
+    "id": "S-020",
+    "subject": "API rate limit hit",
+    "description": "Customer integration gets rate limit responses from the API.",
+    "resolution": "Raised the rate limit and rotated the API key.",
+    "agent": "Priya",
+    "tools_used": [
+      "api explorer",
+      "admin console"
+    ],
+    "daysAgo": 18,
+    "hoursToResolve": 2.5
+  },
+  {
+    "id": "S-021",
+    "subject": "OAuth token expired for integration",
+    "description": "OAuth integration fails; token expired and API calls are rejected.",
+    "resolution": "Regenerated the token and allow-listed the callback domain.",
+    "agent": "Ravi",
+    "tools_used": [
+      "api explorer"
+    ],
+    "daysAgo": 29,
+    "hoursToResolve": 3.0
+  },
+  {
+    "id": "S-022",
+    "subject": "Need help with initial setup",
+    "description": "New customer needs to configure settings and finish onboarding setup.",
+    "resolution": "Updated the configuration settings and walked through setup.",
+    "agent": "Meera",
+    "tools_used": [
+      "screen share"
+    ],
+    "daysAgo": 10,
+    "hoursToResolve": 1.5
+  },
+  {
+    "id": "S-023",
+    "subject": "Install fails on managed laptops",
+    "description": "Install is blocked by company policy; configuration of the environment needed.",
+    "resolution": "Updated settings and allow-listed the installer; install succeeded.",
+    "agent": "Asha",
+    "tools_used": [
+      "remote desktop",
+      "screen share"
+    ],
+    "daysAgo": 37,
+    "hoursToResolve": 6.0
+  },
+  {
+    "id": "S-024",
+    "subject": "Not receiving email notifications",
+    "description": "Notification emails are not receiving; likely spam folder.",
+    "resolution": "Allow-listed the sender domain and re-enabled notification settings.",
+    "agent": "Priya",
+    "tools_used": [
+      "admin console",
+      "mail logs"
+    ],
+    "daysAgo": 12,
+    "hoursToResolve": 1.0
+  },
+  {
+    "id": "S-025",
+    "subject": "SMS alerts delayed",
+    "description": "SMS notification arrive hours late; notify rules misfire.",
+    "resolution": "Restarted the notification service and updated the configuration.",
+    "agent": "Ravi",
+    "tools_used": [
+      "log viewer",
+      "ssh"
+    ],
+    "daysAgo": 24,
+    "hoursToResolve": 3.0
+  },
+  {
+    "id": "S-026",
+    "subject": "Weekly digest email missing",
+    "description": "Customer not receiving the weekly digest email.",
+    "resolution": "Updated the notification settings and allow-listed the domain.",
+    "agent": "Priya",
+    "tools_used": [
+      "mail logs"
+    ],
+    "daysAgo": 63,
+    "hoursToResolve": 2.0
+  },
+  {
+    "id": "S-027",
+    "subject": "Things feel off since Tuesday",
+    "description": "Customer says something is different and not working like before.",
+    "resolution": "Escalated to engineering; they rolled back a feature flag.",
+    "agent": "Asha",
+    "tools_used": [
+      "jira"
+    ],
+    "daysAgo": 13,
+    "hoursToResolve": 9.0
+  },
+  {
+    "id": "S-028",
+    "subject": "Strange behaviour with shared board",
+    "description": "The shared board behaves oddly for one team only.",
+    "resolution": "Restarted the service after reviewing the logs.",
+    "agent": "Meera",
+    "tools_used": [
+      "log viewer"
+    ],
+    "daysAgo": 31,
+    "hoursToResolve": 5.0
+  },
+  {
+    "id": "S-029",
+    "subject": "Login slow and then error",
+    "description": "Login is slow and then shows an error; authentication timed out.",
+    "resolution": "Restarted the auth service and cleared the cache.",
+    "agent": "Ravi",
+    "tools_used": [
+      "grafana",
+      "log viewer"
+    ],
+    "daysAgo": 70,
+    "hoursToResolve": 3.0
+  },
+  {
+    "id": "S-030",
+    "subject": "Billing page crash",
+    "description": "Billing page crash with an error after payment update.",
+    "resolution": "Applied a patch and issued a refund for the failed charge.",
+    "agent": "Priya",
+    "tools_used": [
+      "billing portal",
+      "log viewer"
+    ],
+    "daysAgo": 85,
+    "hoursToResolve": 6.0
+  }
+]
