@@ -1,0 +1,13 @@
+{
+  "name": "insight-vault",
+  "version": "1.0.0",
+  "description": "Local-first research repository inspired by Dovetail: highlight, tag, and turn evidence into traceable insights.",
+  "main": "server.js",
+  "bin": { "insight-vault": "server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/api.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
