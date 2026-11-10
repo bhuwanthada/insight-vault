@@ -29,7 +29,7 @@ function save(db) {
 
 // ---------- local "AI": extractive summary, keywords, sentiment ----------
 const STOP = new Set(
-  "a an the and or but if then so of to in on at by for with from as is are was were be been it its this that these those i you he she we they my your our their me us them not no yes do does did have has had just very really can could would should will about into than too also like get got one".split(" ")
+  "a an the and or but if then so of to in on at by for with from as is are was were be been it its this that these those i you he she we they my your our their me us them not no yes do does did have has had just very really can could would should will about into than too also like get got one how what why when where who which anything something everything thanks thank tell joining honestly kept ended up".split(" ")
 );
 const POS = "love great easy helpful good happy clear fast useful intuitive enjoy nice smooth".split(" ");
 const NEG = "hate slow confusing frustrating hard difficult bug broken expensive annoying painful bad stuck problem issue complicated".split(" ");
@@ -37,7 +37,9 @@ const NEG = "hate slow confusing frustrating hard difficult bug broken expensive
 function words(text) {
   return (text.toLowerCase().match(/[a-z']{3,}/g) || []).filter((w) => !STOP.has(w));
 }
-function analyze(text) {
+function analyze(raw) {
+  // drop "Speaker:" labels so names and roles don't dominate keywords
+  const text = raw.replace(/^\s*[A-Z][\w .'-]{0,30}:\s*/gm, "");
   const freq = {};
   for (const w of words(text)) freq[w] = (freq[w] || 0) + 1;
   const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([w]) => w);

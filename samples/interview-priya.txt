@@ -1,0 +1,23 @@
+Interviewer: Thanks for joining, Priya. Tell me about how your team does customer research today.
+
+Priya: Honestly it is a mess. We record calls on Zoom, dump the transcripts in Google Docs, and then someone copies quotes into a spreadsheet. Finding anything from three months ago is painful.
+
+Interviewer: What have you tried to fix that?
+
+Priya: We tried a research repository tool last year. I love the highlighting and the way you can tag a quote, that part was great. But the pricing was a real problem. It was expensive for limited user access, so only two of us got seats and the product managers were locked out.
+
+Interviewer: How did that affect the team?
+
+Priya: The PMs kept asking me for quotes in Slack. I became a human search engine. That is slow and frustrating, and it defeats the point of having a repository.
+
+Interviewer: What about the AI features?
+
+Priya: The summaries are helpful for a first pass, they save me an hour per interview. But I do not fully trust them. I always want to click back to the exact quote and the video moment to be sure. If I can not trace it, I can not show it to a stakeholder.
+
+Interviewer: Anything else that gets in your way?
+
+Priya: Tagging. The tag taxonomy is hard to get right, and we ended up with onboarding, on-boarding and signup flow all meaning the same thing. It gets confusing quickly. Also our legal team worries about where the data is stored, so a tool that keeps data in the EU or on our own machines would be easier to approve.
+
+Interviewer: If you could change one thing?
+
+Priya: Make it simple, make it cheap for the whole team, and keep every insight linked to its evidence. That is all I need.
