@@ -1,3 +1,11 @@
+.venv/
 data/
+__pycache__/
+.pytest_cache/
+.coverage
 node_modules/
+.next/
+coverage/
 *.tmp
+e2e/screenshots/
+frontend/AGENTS.md
