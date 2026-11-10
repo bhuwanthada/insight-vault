@@ -1,82 +1,159 @@
 # Insight Vault
 
-**A free, private research notebook for turning interview transcripts into evidence-backed insights.**
+**A private, local-first workspace that turns interview transcripts and support tickets into evidence-backed insights.**
 
-Paste a transcript, highlight the important quotes, tag them, and group them into insights. Every insight stays linked to the exact quote it came from, so you can always show your evidence.
+- Highlight and tag quotes in transcripts, then group them into insights that stay linked to their source.
+- Ask an LLM to suggest insights. Every suggestion is validated against your real quotes.
+- See which issues were diagnosed in the last 7, 14, 30, 60 or 90 days and how support agents fixed them.
+- Turn that report into a document and send it through a (mock) approval workflow.
 
-It runs entirely on your own computer. There are no accounts, no seat limits and no cloud.
+Your data stays on your machine in a single JSON file. The LLM is optional: without one, everything still works using deterministic rules.
 
-## Why this exists
-
-Insight Vault is inspired by [Dovetail](https://dovetail.com), the best-known customer research repository. I reviewed Dovetail and its competitors (Condens, Marvin, Aurelius, Notably, Reduct) and combined the best ideas:
-
-| Idea | Borrowed from | How it works here |
+| Notes and highlights | AI-suggested insights | Support resolution report |
 |---|---|---|
-| Highlight, tag, and trace insights to the source quote | Dovetail | Each insight links back to the exact quote and note |
-| Flat pricing, unlimited users | Aurelius | Free and open source, with no accounts or seats |
-| Data stays in your control | Condens | Everything is stored in a local file, `data/db.json` |
-| Automatic summaries | Marvin, Notably | A summary, keywords and sentiment, computed locally |
+| ![Notes](docs/screenshots/notes-highlights.png) | ![Suggestions](docs/screenshots/ai-suggestions.png) | ![Support report](docs/screenshots/support-report.png) |
+
+A complete example of the generated document, sent for approval, is in [`docs/sample-support-report.md`](docs/sample-support-report.md).
+
+## Architecture
+
+```text
+Browser ──► Next.js + React (frontend/, port 3000)
+               │  /api/* proxied
+               ▼
+            Flask API served by Waitress (backend/, port 5001)
+               ├── JSON file store      data/db.json (atomic writes, lock-protected)
+               ├── Deterministic rules  keyword classifier, fix extractor, tag grouping
+               └── LLM via LiteLLM      optional; any provider LiteLLM supports, including OpenRouter
+```
+
+| Folder | What it contains |
+|---|---|
+| `backend/` | Python API, analysis, LLM client, caching and concurrency helpers |
+| `frontend/` | Next.js app (React components in `src/components`) |
+| `tests/` | Python tests (pytest) |
+| `frontend/tests/` | React tests (Vitest and Testing Library) |
+| `e2e/` | Browser tests that drive the real app (Playwright) |
+| `samples/` | Fictional interview transcript and 30 fictional support tickets |
+| `docs/` | Screenshots and the sample approval document |
 
 ## Quick start
 
-You need [Node.js](https://nodejs.org) 18 or newer. There is nothing else to install.
+You need **Python 3.10+** and **Node.js 18+**.
 
 ```bash
 git clone https://github.com/bhuwanthada/insight-vault.git
 cd insight-vault
+npm run setup      # creates .venv, installs Python and Node dependencies (once)
+npm start          # starts the API and the UI, then opens http://localhost:3000
+```
+
+On Windows, after `npm run setup`, you can double-click `start.bat` instead.
+
+The first start builds the UI, which takes about a minute.
+
+### Try it with the sample data
+
+1. **Transcript:** click **+ Add note**, load `samples/interview-priya.txt`, then select text to highlight and tag it.
+2. **Support report:** open the **Support report** tab, click **Load sample tickets**, then change the time window.
+3. **Document:** click **Generate document**, **Send for approval (mock)**, enter a reviewer name and click **Approve**.
+
+## Using an LLM (optional)
+
+The app talks to LLMs through [LiteLLM](https://docs.litellm.ai), so you choose the model with one setting. To use OpenRouter:
+
+```bash
+# Windows PowerShell
+$env:LLM_MODEL = "openrouter/<vendor>/<model>"
+$env:OPENROUTER_API_KEY = "<your key>"
 npm start
 ```
 
-On Windows you can also double-click `start.bat`.
-
-The app opens at <http://localhost:3737>.
-
-## Try it with the sample interview
-
-1. Start the app (`npm start`).
-2. In a second terminal, run `node scripts/demo.js`.
-3. Refresh the page. You will see one interview, 7 tagged highlights and 3 insights.
-
-The sample transcript is in [`samples/interview-priya.txt`](samples/interview-priya.txt).
-
-## How to use it
-
-1. **Add a note.** Click **+ Add note**, then paste a transcript or load a `.txt`, `.md`, `.vtt`, `.srt` or `.csv` file.
-2. **Highlight.** Select any text in the note, type tags such as `pricing, onboarding`, and press Enter.
-3. **Build insights.** Open the **Insights** tab, filter by tag, tick the quotes that belong together, give the insight a title, and create it.
-4. **Search.** The **Search** tab finds text in notes, quotes and tags.
-5. **Export.** Click **Export insights (.md)** to download all insights and their quotes as Markdown.
-
-## Settings
+Any other LiteLLM model id works the same way, with that provider's own API key variable.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `3737` | Port the app listens on |
-| `DATA_FILE` | `data/db.json` | Where your data is stored |
-| `NO_OPEN` | unset | Set to `1` to stop the browser opening automatically |
+| `LLM_MODEL` | empty (LLM off) | LiteLLM model id |
+| `LLM_API_KEY` | empty | Optional key; otherwise LiteLLM reads the provider's variable |
+| `LLM_TIMEOUT` | `30` | Seconds before a call is abandoned |
+| `LLM_MAX_RETRIES` | `2` | Retries per call, with exponential backoff and jitter |
+| `LLM_MAX_CONCURRENCY` | `4` | Maximum simultaneous LLM calls |
+| `LLM_VOTES` | `3` | Samples per ambiguous ticket (see below) |
+| `LLM_VOTE_TEMPERATURE` | `0.7` | Sampling temperature for those votes |
+| `CACHE_TTL` / `CACHE_SIZE` | `3600` / `512` | Cache lifetime in seconds and maximum entries |
+| `PORT` / `DATA_FILE` | `5001` / `data/db.json` | API port and storage path |
 
-## Run the tests
+The header shows whether an LLM is active. Your quotes and tickets are sent to the model provider you choose, so pick one that fits your privacy needs.
+
+## How it stays reliable
+
+**Deterministic first, probabilistic when needed.**
+Support tickets are diagnosed by keyword rules. A clear match is decided instantly, for free, and the same way every time. Only ambiguous tickets go to the LLM. They are sampled several times and the majority answer wins. The share of votes that agree is the confidence score. The LLM's answer must be one of the fixed categories, or it is ignored.
+
+**Insights are validated.**
+LLM-suggested insights must cite quote ids that exist. Invented ids are dropped, and confidence is the share of cited ids that were real. If nothing valid remains, the app falls back to a rule that groups quotes sharing a tag.
+
+**Caching.**
+Trustworthy LLM results are cached (LRU with expiry), keyed by a hash of the input, the model and the prompt version. Fallback results are never cached, so a recovered LLM is used again straight away.
+
+**Race conditions.**
+- *Duplicate work:* identical requests that arrive together share one LLM call (single-flight), so a burst of reports does not stampede the provider.
+- *Lost updates:* reads and writes of the data file share one lock, and files are replaced atomically. A test runs four writers and three readers at once and checks that no update is lost.
+- *Approvals:* a document's status changes by compare-and-set under the lock. If eight people approve and reject at the same moment, exactly one wins and the rest receive `409 Conflict`.
+
+**Failure handling.**
+Each LLM call has a timeout, a concurrency limit, retries with backoff, and a circuit breaker that stops calling a failing provider for 30 seconds. When the LLM is unavailable the app degrades to rules and says so in the UI.
+
+## The support report
+
+Pick a time window and the report shows, for tickets resolved in that period:
+
+- the **issue categories diagnosed**, with ticket counts, share and average time to resolve
+- **how each was fixed**: the actions agents took (for example "Reset password / credentials") and the tools they used
+- the busiest agents and how many diagnoses were low-confidence
+
+Fixes are extracted from the resolution notes by rules, so they are consistent and explainable. Generated documents move through `draft`, `pending approval`, `approved` or `rejected`. The approval is a **mock**: it records the request and decision locally and sends nothing.
+
+To ingest your own tickets, `POST` JSON to `/api/tickets` with `subject`, `resolution`, `createdAt`, `resolvedAt` (ISO-8601) and optionally `agent`, `tools_used` and `description`.
+
+## API summary
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/health`, `GET /api/llm/status` | Liveness and LLM configuration |
+| `GET /api/state` | Notes, highlights and insights |
+| `POST /api/notes`, `GET`/`DELETE /api/notes/<id>` | Manage notes |
+| `GET /api/notes/<id>/analysis` | Keywords, summary, sentiment |
+| `POST /api/highlights`, `PATCH`/`DELETE /api/highlights/<id>` | Manage highlights |
+| `POST /api/insights`, `POST /api/insights/suggest`, `DELETE /api/insights/<id>` | Insights and AI suggestions |
+| `GET /api/search?q=` | Search notes, quotes and tags |
+| `GET /api/export` | Download insights as Markdown |
+| `GET`/`POST /api/tickets`, `POST /api/tickets/sample` | Support tickets |
+| `GET /api/report?days=7\|14\|30\|60\|90` | Resolution report |
+| `GET`/`POST /api/reports`, `POST /api/reports/<id>/submit`, `POST /api/reports/<id>/decision` | Documents and mock approval |
+
+## Tests
 
 ```bash
-npm test
+npm test            # backend and frontend unit tests, both enforcing 100% coverage
+npm run test:e2e    # real browser tests against the running stack (needs Chrome or Edge)
 ```
 
-## Project layout
+| Suite | Tests | Coverage |
+|---|---|---|
+| Backend (pytest) | 74 | 100% of statements and branches (enforced) |
+| Frontend (Vitest) | 48 | 100% of statements, branches, functions and lines (enforced) |
+| End-to-end (Playwright) | 20 | Full user journeys, with screenshots in `e2e/screenshots/` |
 
-```text
-server.js        Web server, JSON API, and the local summary logic
-public/          The web interface (a single index.html, no build step)
-test/            API tests
-samples/         Example interview transcript
-scripts/demo.js  Loads the sample and builds example insights
-start.bat        One-click launcher for Windows
-```
+The unit tests never call a real LLM: it is replaced by a scripted fake. The end-to-end suite runs with no LLM configured, so it exercises the rules fallback.
 
 ## Limitations
 
-- Summaries and sentiment use simple word-counting, not a language model, so treat them as a first pass.
+- The built-in sentiment and summary use simple word counting, not a language model.
 - There is no audio or video transcription. Paste text or load a transcript file.
-- Data is stored in one JSON file on one machine, and the server only listens on `localhost`.
+- Storage is one JSON file on one machine, which suits a single team but not heavy multi-user use.
+- The approval workflow is a mock and sends no email or chat message.
+- There is no login, so run it on a trusted machine or network. The API listens on `localhost` only.
 
 ## License
 

@@ -1,14 +1,19 @@
 {
   "name": "insight-vault",
-  "version": "1.0.0",
-  "description": "Local-first research repository inspired by Dovetail: highlight, tag, and turn evidence into traceable insights.",
-  "main": "server.js",
-  "bin": { "insight-vault": "server.js" },
-  "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/api.test.js"
-  },
-  "engines": { "node": ">=18" },
+  "version": "2.0.0",
+  "private": true,
+  "description": "Local-first research repository: highlight and tag interview quotes, build insights that stay linked to their evidence, and report on support resolutions.",
   "author": "Bhuwan Thada",
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "setup": "python -m venv .venv && .venv/Scripts/python -m pip install -r requirements-dev.txt && npm --prefix frontend install",
+    "start": "node scripts/start.mjs",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "python -m pytest",
+    "test:frontend": "npm --prefix frontend test",
+    "test:e2e": "node --test e2e/ui.test.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.50.0"
+  }
 }
