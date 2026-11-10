@@ -9,5 +9,6 @@
     "test": "node --test test/api.test.js"
   },
   "engines": { "node": ">=18" },
+  "author": "Bhuwan Thada",
   "license": "MIT"
 }
