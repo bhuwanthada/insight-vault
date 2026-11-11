@@ -3,7 +3,6 @@ import logging
 import os
 import secrets
 import time
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
@@ -12,17 +11,15 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.local import LocalProxy
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import orgkeys, orgs, schema, sso, support
+from . import integrations, orgs, sso, support
 from .analysis import analyze
 from .auth import Authenticator, DirectoryResolver, EnvResolver, has_role, is_public, required_feature, required_role
-from .config import ConfigError, Settings
-from .db import StoreFactory, make_engine
-from .directory import Directory
+from .config import Settings
+from .connectors.repo import ConnectorRepo
+from .connectors.sync import SyncService
 from .limits import RateLimiter
 from .observability import Metrics
-from .report import load_template
-from .rules import load_rules
-from .secrets_box import SecretBox
+from .runtime import build_runtime
 from .tenancy import QuotaExceeded, Tenants, UnknownOrg
 
 log = logging.getLogger("insight_vault")
@@ -72,23 +69,6 @@ def export_markdown(db):
     return "\n".join(lines) + "\n"
 
 
-def _license(settings, verifier):
-    """Verify LICENSE_KEY at startup. Returns its sections, or None when there is no license.
-
-    An expired license still starts the app, read-only, so a customer can always export their data."""
-    if not settings.license_key:
-        return None
-    try:
-        claims = verifier.verify(settings.license_key, allow_expired=True)
-    except orgkeys.OrgKeyError as exc:
-        raise ConfigError(f"LICENSE_KEY is not valid: {exc}") from exc
-    if claims["mode"] != "license":
-        raise ConfigError("LICENSE_KEY must be a license key (mode=license); tenant keys are for SaaS organizations")
-    if settings.org_id not in ("default", claims["org_id"]):
-        raise ConfigError(f"ORG_ID ({settings.org_id}) does not match the license's organization ({claims['org_id']})")
-    return claims
-
-
 def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=None, engine=None):
     settings = settings or Settings.from_env()
     app = Flask(__name__)
@@ -103,25 +83,14 @@ def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=Non
     if settings.trust_proxy:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=settings.trust_proxy, x_proto=settings.trust_proxy, x_host=settings.trust_proxy)
 
-    # ---- storage, organizations and credentials
-    if engine is None and settings.database_url:
-        engine = make_engine(settings.database_url, settings.db_pool_size)
-    if engine is not None:
-        schema.migrate(engine, clock().isoformat())
-    multi = settings.deployment_mode == "multi_tenant"
-    factory = StoreFactory(engine, json_path=data_file or settings.data_file or DEFAULT_DATA_FILE)
-    directory = Directory(engine) if multi else None
-    box = SecretBox(settings.secrets_key)
-    public_pem = orgkeys.load_public_key(settings)
-    verifier = orgkeys.KeyVerifier(public_pem, directory.revoked_ids if directory else (lambda: set()), clock) if public_pem else None
-    license_claims = _license(settings, verifier)
-    if license_claims:
-        settings = replace(settings, org_id=license_claims["org_id"])  # the license defines the organization
-    load_rules(settings.rules_file), load_template(settings.report_template)  # fail at startup, not on the first request
-    tenants = Tenants(settings, factory, directory, box, clock, license_claims, llm)
-    if not multi:
-        tenants.context(settings.org_id)  # builds the one organization now, so bad configuration stops startup
-    app.extensions["insight_vault"] = {"tenants": tenants, "directory": directory, "factory": factory, "verifier": verifier}
+    # ---- storage, organizations and credentials (shared with the background worker)
+    rt = build_runtime(settings, clock, data_file or settings.data_file or DEFAULT_DATA_FILE, llm, engine)
+    settings = rt.settings  # a license may have set the organization id
+    multi, factory, directory, box, verifier, tenants = rt.multi, rt.factory, rt.directory, rt.box, rt.verifier, rt.tenants
+    repo = ConnectorRepo(rt.engine) if rt.engine is not None else None
+    sync_service = SyncService(tenants, repo, box, clock, settings) if repo else None
+    app.extensions["insight_vault"] = {"tenants": tenants, "directory": directory, "factory": factory, "verifier": verifier,
+                                       "repo": repo, "sync": sync_service}
     resolver = DirectoryResolver(directory) if multi else EnvResolver(tenants.context(settings.org_id).settings, settings.org_id)  # includes the license's domains and admins
     authenticator = Authenticator(settings, resolver, verifier, default_org=None if multi else settings.org_id)
     limiter, llm_limiter = RateLimiter(settings.rate_limit), RateLimiter(settings.rate_limit_llm)
@@ -270,8 +239,9 @@ def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=Non
         return jsonify(services.llm.ping())
 
     sso.register_routes(app, settings, authenticator, oauth or (sso.build_oauth(app, settings) if settings.auth_mode == "sso" else None), audit)
-    env = orgs.OrgEnv(settings, tenants, directory, verifier, box, audit, clock)
+    env = orgs.OrgEnv(settings, tenants, directory, verifier, box, audit, clock, repo)
     orgs.register(app, env)
+    integrations.register(app, integrations.IntegrationsEnv(settings, repo, box, clock, sync_service))
 
     def body():
         return request.get_json(silent=True) or {}

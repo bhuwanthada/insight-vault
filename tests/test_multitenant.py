@@ -354,7 +354,7 @@ def test_org_info_reports_plan_usage_and_expiry(world):
     token = world.activate("acme", plan="growth", quotas={"tickets": 10, "seats": 4})
     info = world.client.get("/api/org", headers=bearer(token)).get_json()
     assert info["id"] == "acme" and info["name"] == "Acme" and info["plan"] == "growth" and info["status"] == "active"
-    assert info["quotas"] == {"tickets": 10, "seats": 4} and info["usage"] == {"tickets": 0, "seats": 1, "tokensToday": 0}
+    assert info["quotas"] == {"tickets": 10, "seats": 4} and info["usage"] == {"tickets": 0, "seats": 1, "tokensToday": 0, "connectors": 0}
     assert info["deploymentMode"] == "multi_tenant" and info["readOnly"] is False and info["expiresAt"].startswith("2027")
 
 

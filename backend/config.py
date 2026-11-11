@@ -53,6 +53,10 @@ class Settings:
     secrets_key: str = ""  # master key that encrypts stored secrets (per-org LLM keys, connector credentials)
     platform_admin_keys: tuple = ()  # ((name, key), ...) for the SaaS operator API
     redis_url: str = ""  # shared cache, locks and rate limits across several processes
+    sync_initial_days: int = 90  # how far back the first sync of a connector reaches
+    sync_max_pages: int = 50  # pages fetched per run; a longer sync continues on the next run
+    connector_extra_hosts: tuple = ()  # extra host suffixes connectors may contact (custom vendor domains)
+    worker_poll_seconds: int = 15
     # --- LLM ---
     llm_provider: str = "none"
     llm_model: str = ""
@@ -170,6 +174,10 @@ class Settings:
             secrets_key=r.text("SECRETS_KEY"),
             platform_admin_keys=tuple(r.pairs("PLATFORM_ADMIN_KEYS")),
             redis_url=r.text("REDIS_URL"),
+            sync_initial_days=r.number("SYNC_INITIAL_DAYS", cls.sync_initial_days, int, 1, 3650),
+            sync_max_pages=r.number("SYNC_MAX_PAGES", cls.sync_max_pages, int, 1, 1000),
+            connector_extra_hosts=tuple(r.items("CONNECTOR_EXTRA_HOSTS")),
+            worker_poll_seconds=r.number("WORKER_POLL_SECONDS", cls.worker_poll_seconds, int, 1, 3600),
             llm_provider=provider,
             llm_model=model,
             llm_api_key=r.text("LLM_API_KEY") or (r.text(provider_key) if provider_key else ""),

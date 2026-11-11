@@ -26,6 +26,7 @@ class OrgEnv:
     box: object
     audit: object  # audit(actor, action, detail="", org_id=None)
     clock: object
+    repo: object = None  # the connector registry, when a database is configured
 
 
 def _error(message, status):
@@ -87,6 +88,7 @@ def register(app, env):
                 "tickets": ctx.store.ticket_count(),
                 "seats": env.directory.count_members(ctx.org_id) if multi else None,
                 "tokensToday": ctx.services.usage.snapshot()["tokens"],
+                "connectors": env.repo.count(ctx.org_id) if env.repo else 0,
             },
             "expiresAt": _iso(ctx.exp), "readOnly": ctx.read_only(now_ts),
         })
