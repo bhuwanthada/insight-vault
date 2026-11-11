@@ -13,17 +13,21 @@ class TTLCache:
         self.maxsize, self.ttl, self._clock = maxsize, ttl, clock
         self._items = OrderedDict()
         self._lock = threading.Lock()
+        self.hits = self.misses = 0
 
     def get(self, key, default=None):
         with self._lock:
             entry = self._items.get(key, _MISS)
             if entry is _MISS:
+                self.misses += 1
                 return default
             expires_at, value = entry
             if expires_at <= self._clock():
                 del self._items[key]
+                self.misses += 1
                 return default
             self._items.move_to_end(key)
+            self.hits += 1
             return value
 
     def set(self, key, value):

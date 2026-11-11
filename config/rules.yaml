@@ -1,0 +1,32 @@
+# Issue categories and fix actions. Edit freely; point RULES_FILE at your own copy to override.
+#
+# categories: each category lists keywords. A keyword matches at the start of a word, so "timeout"
+#             also matches "timeouts". Tickets are scored by how many keywords they contain.
+# actions:    patterns (regular expressions, case-insensitive) matched against the resolution notes
+#             to describe what the support agent actually did.
+
+uncategorised: Uncategorised
+
+categories:
+  Login & access: [login, log in, password, locked out, sso, 2fa, mfa, authentication, access denied, permission]
+  Performance: [slow, latency, timeout, timed out, lag, loading, performance, hang]
+  Billing & payments: [invoice, billing, refund, charge, payment, subscription, credit card]
+  Data sync & import: [sync, import, export, csv, missing data, duplicate, migration]
+  Crashes & errors: [crash, error, exception, "500", freeze, blank screen, stack trace]
+  Integrations & API: [api, webhook, integration, token, rate limit, oauth]
+  Configuration & setup: [setup, configure, configuration, install, onboarding, settings]
+  Notifications & email: [email, notification, notify, spam, not receiving, sms]
+
+actions:
+  - {label: Restarted service, pattern: '\brestart'}
+  - {label: Cleared cache, pattern: '\bcleared? (the )?cache|\bcache (was )?(cleared|purged)'}
+  - {label: Reset password / credentials, pattern: '\breset (the |their |his |her )?(password|credentials|2fa|mfa)'}
+  - {label: Rolled back release, pattern: '\broll(ed)? ?back'}
+  - {label: Reinstalled application, pattern: '\breinstall'}
+  - {label: Applied patch / hotfix, pattern: '\b(patch|hotfix)'}
+  - {label: Re-synced data, pattern: '\bre-?sync'}
+  - {label: Updated configuration, pattern: '\b(updated?|changed?|corrected?) (the )?(config|configuration|settings)'}
+  - {label: Escalated to engineering, pattern: '\bescalat'}
+  - {label: Issued refund / credit, pattern: '\b(refund|credited|credit note)'}
+  - {label: Regenerated API key / token, pattern: '\b(regenerat|re-?issu|rotat)\w* (the |a |new )?(api )?(key|token)'}
+  - {label: Allow-listed IP / domain, pattern: '\ballow-?list|\bwhitelist'}

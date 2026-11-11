@@ -1,0 +1,2 @@
+# Optional: only needed when LLM_PROVIDER=litellm
+litellm>=1.50

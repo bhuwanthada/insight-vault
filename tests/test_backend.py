@@ -198,17 +198,23 @@ def test_default_data_file_comes_from_env(tmp_path, monkeypatch):
     assert target.exists()
 
 
-def test_main_serves_with_waitress(monkeypatch):
+def test_main_serves_with_waitress(monkeypatch, tmp_path):
     calls = {}
+    monkeypatch.setenv("ENV_FILE", str(tmp_path / "missing.env"))
     monkeypatch.setenv("PORT", "5999")
+    monkeypatch.setenv("THREADS", "3")
+    monkeypatch.setenv("DATA_FILE", str(tmp_path / "db.json"))
     monkeypatch.setattr("waitress.serve", lambda app, **kw: calls.update(kw))
     app_module.main()
-    assert calls == {"host": "127.0.0.1", "port": 5999, "threads": 8}
+    assert calls == {"host": "127.0.0.1", "port": 5999, "threads": 3}
 
 
-def test_python_dash_m_entrypoint(monkeypatch):
+def test_python_dash_m_entrypoint(monkeypatch, tmp_path):
     calls = []
+    monkeypatch.setenv("ENV_FILE", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("DATA_FILE", str(tmp_path / "db.json"))
     monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.setenv("LLM_MODEL", "some/model")  # enables the LLM, covering the startup log branch
     monkeypatch.setattr("waitress.serve", lambda app, **kw: calls.append(kw["port"]))
     runpy.run_module("backend", run_name="__main__")
     assert calls == [5001]
@@ -222,10 +228,11 @@ def test_health_headers_and_request_id(client):
 
 
 def test_llm_status(client, make_client):
-    assert client.get("/api/llm/status").get_json() == {"enabled": False, "model": None, "circuitOpen": False}
+    off = client.get("/api/llm/status").get_json()
+    assert off["enabled"] is False and off["provider"] == "none" and off["model"] is None and off["circuits"] == {}
     from tests.conftest import FakeLLM
-    status = make_client(llm=FakeLLM(None), settings=app_module.Settings(model="fake/model")).get("/api/llm/status").get_json()
-    assert status["enabled"] is True and status["model"] == "fake/model"
+    on = make_client(llm=FakeLLM(None), settings=app_module.Settings(llm_provider="litellm", llm_model="fake/model")).get("/api/llm/status").get_json()
+    assert on["enabled"] is True and on["model"] == "fake/model" and on["provider"] == "litellm"
 
 
 def test_http_errors_and_unexpected_errors_are_json(client, monkeypatch):

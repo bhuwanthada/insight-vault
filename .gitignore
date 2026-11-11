@@ -9,3 +9,4 @@ coverage/
 *.tmp
 e2e/screenshots/
 frontend/AGENTS.md
+.env

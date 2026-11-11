@@ -2,24 +2,34 @@
 import logging
 import os
 import secrets
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from flask import Flask, Response, g, jsonify, request
+from flask import Flask, Response, g, jsonify, request, session
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import support
+from . import sso, support
 from .analysis import analyze
+from .auth import Authenticator, has_role, is_public, required_role
 from .classify import Classifier
 from .config import Settings
 from .insights_ai import InsightSuggester
-from .llm import LLMClient
+from .limits import RateLimiter
+from .llm import LLMClient, UsageTracker
+from .observability import Metrics
+from .prompts import Prompts
+from .report import load_template
 from .resilience import SingleFlight, TTLCache
+from .rules import load_rules
 from .store import Store
 
 log = logging.getLogger("insight_vault")
 
-DEFAULT_DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "db.json")
+DEFAULT_DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "db.json")
+UNSAFE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+LLM_PATHS = ("/api/insights/suggest", "/api/report", "/api/reports", "/api/llm/test")  # endpoints that may call the LLM
 
 
 def _uid():
@@ -69,37 +79,160 @@ class Services:
     flight: SingleFlight
     classifier: Classifier
     suggester: InsightSuggester
+    rules: object
+    prompts: Prompts
+    template: str
+    usage: UsageTracker
+    metrics: Metrics
 
 
-def build_services(settings, llm=None):
-    llm = llm or LLMClient(settings)
+def build_services(settings, store, llm=None):
+    rules = load_rules(settings.rules_file)
+    prompts = Prompts(settings.prompt_dir, settings.output_language)
+    usage = UsageTracker(store, settings.daily_token_cap)
+    llm = llm or LLMClient(settings, usage=usage)
     cache, flight = TTLCache(settings.cache_size, settings.cache_ttl), SingleFlight()
-    return Services(settings, llm, cache, flight, Classifier(llm, cache, flight, settings), InsightSuggester(llm, cache, flight))
+    return Services(
+        settings, llm, cache, flight,
+        Classifier(llm, cache, flight, settings, rules, prompts),
+        InsightSuggester(llm, cache, flight, prompts),
+        rules, prompts, load_template(settings.report_template), usage, Metrics(),
+    )
 
 
-def create_app(data_file=None, settings=None, llm=None, clock=_utcnow):
+def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=None):
+    settings = settings or Settings.from_env()
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
-    store = Store(data_file or os.environ.get("DATA_FILE") or DEFAULT_DATA_FILE)
-    services = build_services(settings or Settings.from_env(), llm)
+    app.config.update(
+        MAX_CONTENT_LENGTH=settings.max_body_mb * 1024 * 1024,
+        SECRET_KEY=settings.secret_key or secrets.token_hex(32),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=settings.cookie_secure,
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=settings.session_hours),
+    )
+    if settings.trust_proxy:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=settings.trust_proxy, x_proto=settings.trust_proxy, x_host=settings.trust_proxy)
+    store = Store(data_file or settings.data_file or DEFAULT_DATA_FILE)
+    services = build_services(settings, store, llm)
+    authenticator = Authenticator(settings)
+    limiter, llm_limiter = RateLimiter(settings.rate_limit), RateLimiter(settings.rate_limit_llm)
+    allowed_origins = {settings.public_url, *settings.cors_origins}
+
+    def audit(actor, action, detail=""):
+        with store.lock:
+            db = store.load()
+            db["audit"].append({"at": _now(), "actor": actor, "action": action, "detail": detail})
+            del db["audit"][: -settings.audit_retention]
+            store.save(db)
 
     @app.before_request
-    def tag_request():
+    def guard():
         g.request_id = request.headers.get("X-Request-ID") or secrets.token_hex(8)
+        g.started = time.monotonic()
+        g.user = None
+        path = request.path
+        if not path.startswith("/api/"):
+            return None
+        if request.method == "OPTIONS":  # CORS preflight; headers are added in after_request
+            return Response(status=204)
+        if path not in ("/api/health", "/api/ready"):
+            if not limiter.allow(request.remote_addr)[0] or (
+                path in LLM_PATHS and request.method != "GET" and not llm_limiter.allow(request.remote_addr)[0]
+            ):
+                response = _error("too many requests; slow down", 429)
+                response[0].headers["Retry-After"] = "60"
+                return response
+        if is_public(path):
+            return None
+        user = authenticator.authenticate(request.headers, session)
+        if user is None:
+            return _error("authentication required", 401)
+        origin = request.headers.get("Origin")
+        if settings.auth_mode == "sso" and user["provider"] != "apikey" and request.method in UNSAFE_METHODS and origin and origin not in allowed_origins:
+            return _error("cross-site request blocked", 403)
+        needed = required_role(request.method, path)
+        if not has_role(user, needed):
+            return _error(f"this action requires the {needed} role", 403)
+        g.user = user
+        return None
 
     @app.after_request
-    def add_headers(response):
+    def finish(response):
         response.headers["X-Request-ID"] = g.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if settings.cookie_secure:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        origin = request.headers.get("Origin")
+        if origin in settings.cors_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+            response.headers["Vary"] = "Origin"
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+            services.metrics.inc("http_requests_total", method=request.method, status=f"{response.status_code // 100}xx")
+            log.info("request", extra={"method": request.method, "path": request.path, "status": response.status_code,
+                                       "ms": round((time.monotonic() - g.started) * 1000), "user": (g.user or {}).get("email", "-")})
+            if request.method in UNSAFE_METHODS and response.status_code < 400 and g.user and not request.path.startswith("/api/auth/"):
+                audit(g.user["email"], f"{request.method} {request.path}", str(response.status_code))
         return response
 
     @app.get("/api/health")
     def health():
         return jsonify({"status": "ok"})
 
+    @app.get("/api/ready")
+    def ready():
+        try:
+            store.save(store.load())  # proves the data store is readable and writable
+        except OSError as exc:
+            return _error(f"data store unavailable: {exc}", 503)
+        return jsonify({"status": "ready"})
+
+    @app.get("/api/config/public")
+    def public_config():
+        return jsonify({
+            "appName": settings.app_name, "accentColor": settings.accent_color, "defaultTheme": settings.default_theme,
+            "features": list(settings.features), "windows": list(settings.windows), "defaultDays": settings.default_days,
+            "locale": settings.locale, "authMode": settings.auth_mode,
+        })
+
+    @app.get("/api/config")
+    def admin_config():
+        return jsonify(settings.masked())
+
+    @app.get("/api/usage")
+    def usage():
+        return jsonify({**services.usage.snapshot(), "session": dict(services.llm.stats)})
+
+    @app.get("/api/metrics")
+    def metrics():
+        extra = {f"llm_{k}_total": v for k, v in services.llm.stats.items()}
+        extra.update(cache_hits_total=services.cache.hits, cache_misses_total=services.cache.misses, cache_entries=len(services.cache))
+        return Response(services.metrics.render(extra), mimetype="text/plain")
+
+    @app.get("/api/audit")
+    def audit_log():
+        limit = request.args.get("limit", "100")
+        return jsonify(store.load()["audit"][-(int(limit) if limit.isdigit() and int(limit) > 0 else 100):][::-1])
+
     @app.get("/api/llm/status")
     def llm_status():
-        return jsonify({"enabled": services.llm.enabled, "model": services.settings.model or None, "circuitOpen": not services.llm.breaker.allow()})
+        return jsonify({
+            "enabled": services.llm.enabled, "provider": settings.llm_provider, "model": settings.llm_model or None,
+            "fallbacks": list(settings.llm_fallbacks), "circuits": services.llm.circuits(),
+            "piiMasking": settings.pii_masking, "usage": services.usage.snapshot(),
+        })
+
+    @app.post("/api/llm/test")
+    def llm_test():
+        return jsonify(services.llm.ping())
+
+    sso.register_routes(app, settings, authenticator, oauth or (sso.build_oauth(app, settings) if settings.auth_mode == "sso" else None), audit)
 
     def body():
         return request.get_json(silent=True) or {}
@@ -274,9 +407,14 @@ def create_app(data_file=None, settings=None, llm=None, clock=_utcnow):
 
 
 def main():
+    from dotenv import load_dotenv
     from waitress import serve  # production WSGI server (the Flask dev server is not meant for production)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    port = int(os.environ.get("PORT", "5001"))
-    log.info("Insight Vault API listening on http://127.0.0.1:%d", port)
-    serve(create_app(), host="127.0.0.1", port=port, threads=8)
+    from .observability import configure_logging
+
+    load_dotenv(os.environ.get("ENV_FILE") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    settings = Settings.from_env()
+    configure_logging(settings.log_level, settings.log_format)
+    log.info("Insight Vault API on http://%s:%d (auth=%s, llm=%s)", settings.host, settings.port, settings.auth_mode,
+             f"{settings.llm_provider}:{settings.llm_model}" if settings.llm_enabled else "off")
+    serve(create_app(settings=settings), host=settings.host, port=settings.port, threads=settings.threads)

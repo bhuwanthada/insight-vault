@@ -1,10 +1,12 @@
 """Support-resolution report: what issues were diagnosed in the last N days and how agents fixed them."""
+import os
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from string import Template
 
-from .classify import extract_fixes
+from .config import ConfigError
 
-ALLOWED_DAYS = (7, 14, 30, 60, 90)
+DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "report_template.md")
 
 
 def parse_time(value):
@@ -15,7 +17,7 @@ def _top(counter, n=5):
     return [{"name": name, "count": count} for name, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
 
 
-def build_report(tickets, days, now, classify):
+def build_report(tickets, days, now, classify, extract_fixes):
     start = now - timedelta(days=days)
     window = [
         t for t in tickets if t.get("status") == "resolved" and start <= parse_time(t["resolvedAt"]) <= now
@@ -82,26 +84,24 @@ def deterministic_summary(report):
     )
 
 
-def render_markdown(title, report, summary):
-    lines = [
-        f"# {title}",
-        "",
-        f"**Period:** {report['from']} to {report['to']} (last {report['days']} days)  ",
-        f"**Resolved tickets:** {report['totalTickets']}  ",
-        f"**Low-confidence diagnoses:** {report['lowConfidence']}",
-        "",
-        "## Executive summary",
-        "",
-        summary,
-        "",
-        "## Issues diagnosed and how they were fixed",
-        "",
-    ]
+def load_template(path=""):
+    path = path or DEFAULT_TEMPLATE
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError as exc:
+        raise ConfigError(f"Cannot read report template {path}: {exc}") from exc
+
+
+def render_markdown(title, report, summary, template):
+    """Fill the report template. Placeholders: $title $period $total $low_confidence $summary $categories $agents."""
+    blocks = []
     if not report["categories"]:
-        lines += ["_No resolved tickets in this period._", ""]
+        blocks.append("_No resolved tickets in this period._\n")
     for cat in report["categories"]:
-        lines += [
-            f"### {cat['category']} ({cat['count']} ticket{'' if cat['count'] == 1 else 's'}, {round(cat['share'] * 100)}%)",
+        noun = "ticket" if cat["count"] == 1 else "tickets"
+        blocks.append("\n".join([
+            f"### {cat['category']} ({cat['count']} {noun}, {round(cat['share'] * 100)}%)",
             "",
             f"- Average time to resolve: {cat['avgResolutionHours']} h",
             f"- Average diagnosis confidence: {cat['avgConfidence']}",
@@ -109,8 +109,15 @@ def render_markdown(title, report, summary):
             "- Tools used: " + (", ".join(f"{t['name']} ({t['count']})" for t in cat["topTools"]) or "none recorded"),
             "- Example tickets: " + ", ".join(cat["exampleTickets"]),
             "",
-        ]
-    lines += ["## Support agents", "", "| Agent | Tickets | Most common issue |", "|---|---|---|"]
-    lines += [f"| {a['agent']} | {a['count']} | {a['topCategory']} |" for a in report["byAgent"]]
-    lines += ["", "## Approval", "", "Status is tracked in Insight Vault (mock workflow, no real notification is sent).", ""]
-    return "\n".join(lines)
+        ]))
+    agents = ["| Agent | Tickets | Most common issue |", "|---|---|---|"]
+    agents += [f"| {a['agent']} | {a['count']} | {a['topCategory']} |" for a in report["byAgent"]]
+    return Template(template).safe_substitute(
+        title=title,
+        period=f"{report['from']} to {report['to']} (last {report['days']} days)",
+        total=report["totalTickets"],
+        low_confidence=report["lowConfidence"],
+        summary=summary,
+        categories="\n".join(blocks).rstrip(),
+        agents="\n".join(agents),
+    )

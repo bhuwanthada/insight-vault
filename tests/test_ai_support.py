@@ -4,10 +4,12 @@ from datetime import timedelta
 import pytest
 
 from backend.classify import Classifier, extract_fixes, rule_scores, ticket_text
-from backend.config import Settings
+from backend.prompts import Prompts
+from backend.rules import load_rules
+from backend.config import ConfigError, Settings
 from backend.llm import LLMUnavailable
 from backend.insights_ai import InsightSuggester, rule_suggestions, validate_llm_suggestions
-from backend.report import build_report, deterministic_summary, parse_time, render_markdown
+from backend.report import build_report, deterministic_summary, load_template, parse_time, render_markdown
 from backend.resilience import SingleFlight, TTLCache
 from backend.support import normalise_ticket
 from tests.conftest import NOW, FakeLLM
@@ -17,8 +19,12 @@ VAGUE = {"subject": "Strange behaviour", "description": "Something is different.
 SLOW_BUT_LOGIN = {"subject": "slow login", "description": "slow", "resolution": "ok"}  # 1 Performance hit... ambiguous
 
 
-def classifier(llm, votes=3):
-    return Classifier(llm, TTLCache(), SingleFlight(), Settings(votes=votes, vote_temperature=0.7))
+RULES = load_rules()
+TEMPLATE = load_template()
+
+
+def classifier(llm, votes=3, **overrides):
+    return Classifier(llm, TTLCache(), SingleFlight(), Settings(votes=votes, vote_temperature=0.7, **overrides), RULES, Prompts())
 
 
 # ---------- classification: deterministic ----------
@@ -31,14 +37,14 @@ def test_rules_decide_clear_tickets_without_calling_the_llm():
 
 def test_ticket_text_and_scores():
     assert ticket_text({"subject": "A", "resolution": "B"}) == "a  b"
-    assert rule_scores("password login")["Login & access"] == 2
+    assert rule_scores("password login", RULES)["Login & access"] == 2
 
 
 def test_extract_fixes_actions_and_tools():
-    fixes = extract_fixes({"resolution": "Restarted the service, cleared the cache and rolled back.", "tools_used": [" SSH ", "ssh", "", "Grafana"]})
+    fixes = extract_fixes({"resolution": "Restarted the service, cleared the cache and rolled back.", "tools_used": [" SSH ", "ssh", "", "Grafana"]}, RULES)
     assert fixes["actions"] == ["Restarted service", "Cleared cache", "Rolled back release"]
     assert fixes["tools"] == ["grafana", "ssh"]
-    assert extract_fixes({}) == {"actions": [], "tools": []}
+    assert extract_fixes({}, RULES) == {"actions": [], "tools": []}
 
 
 # ---------- classification: probabilistic ----------
@@ -47,7 +53,7 @@ def test_llm_majority_vote_and_confidence():
     llm = FakeLLM(lambda *a: {"category": next(answers)})
     result = classifier(llm).classify(VAGUE)
     assert result == {"category": "Performance", "confidence": 0.67, "method": "llm-vote"}
-    assert len(llm.calls) == 3 and all(c["temperature"] == 0.7 for c in llm.calls)
+    assert len(llm.calls) == 3 and all(c["temperature"] == 0.7 and c["task"] == "classify" for c in llm.calls)
 
 
 def test_invalid_llm_categories_are_ignored():
@@ -137,7 +143,7 @@ def test_validate_llm_suggestions_drops_bad_items_and_hallucinated_ids():
 
 
 def suggester(llm):
-    return InsightSuggester(llm, TTLCache(), SingleFlight())
+    return InsightSuggester(llm, TTLCache(), SingleFlight(), Prompts())
 
 
 def test_suggester_uses_llm_and_caches():
@@ -230,18 +236,25 @@ def test_empty_report_and_markdown(make_client):
     c = make_client()
     r = c.get("/api/report?days=7").get_json()
     assert r["totalTickets"] == 0 and r["summary"] == "No tickets were resolved in the last 7 days."
-    assert "_No resolved tickets" in render_markdown("T", r, r["summary"])
+    assert "_No resolved tickets" in render_markdown("T", r, r["summary"], TEMPLATE)
+
+
+def test_missing_report_template_is_a_clear_error(tmp_path):
+    with pytest.raises(ConfigError, match="Cannot read report template"):
+        load_template(str(tmp_path / "nope.md"))
 
 
 def test_summary_without_recorded_actions_and_unresolved_tickets_are_excluded():
     tickets = [{"id": "1", "subject": "slow", "status": "resolved", "resolution": "Looked", "createdAt": "2026-06-14T00:00:00+00:00",
                 "resolvedAt": "2026-06-14T02:00:00+00:00", "agent": "A"},
                {"id": "2", "subject": "x", "status": "open", "createdAt": "2026-06-14T00:00:00+00:00", "resolvedAt": "2026-06-14T02:00:00+00:00"}]
-    report = build_report(tickets, 7, NOW, lambda t: {"category": "Performance", "confidence": 0.5, "method": "rules"})
+    classify = lambda t: {"category": "Performance", "confidence": 0.5, "method": "rules"}
+    fixes = lambda t: extract_fixes(t, RULES)
+    report = build_report(tickets, 7, NOW, classify, fixes)
     assert report["totalTickets"] == 1 and "manual investigation" in deterministic_summary(report)
-    md = render_markdown("T", report, "s")
+    md = render_markdown("T", report, "s", TEMPLATE)
     assert "none recorded" in md and "(1 ticket, 100%)" in md  # singular form
-    assert build_report(tickets, 7, NOW + timedelta(days=30), lambda t: {})["totalTickets"] == 0
+    assert build_report(tickets, 7, NOW + timedelta(days=30), lambda t: {}, fixes)["totalTickets"] == 0
 
 
 # ---------- documents + mock approval ----------

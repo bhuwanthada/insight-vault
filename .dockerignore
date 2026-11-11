@@ -1,0 +1,13 @@
+.git
+.venv
+node_modules
+frontend/node_modules
+frontend/.next
+frontend/coverage
+coverage
+data
+e2e/screenshots
+.env
+__pycache__
+.pytest_cache
+.coverage

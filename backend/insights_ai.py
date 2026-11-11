@@ -11,15 +11,9 @@ from collections import defaultdict
 
 from .llm import LLMUnavailable
 
-PROMPT_VERSION = "insights-v1"
+PROMPT_VERSION = "insights-v2"
 MAX_HIGHLIGHTS = 60
 MAX_SUGGESTIONS = 8
-
-SYSTEM_PROMPT = (
-    "You are a research analyst. Group the customer quotes into distinct insights. "
-    'Reply with JSON only: {"insights": [{"title": str, "description": str, "highlightIds": [str]}]}. '
-    "Only use highlight ids you were given. Every insight needs at least one id."
-)
 
 
 def rule_suggestions(highlights):
@@ -63,8 +57,8 @@ def validate_llm_suggestions(raw, known_ids):
 
 
 class InsightSuggester:
-    def __init__(self, llm, cache, flight):
-        self.llm, self.cache, self.flight = llm, cache, flight
+    def __init__(self, llm, cache, flight, prompts):
+        self.llm, self.cache, self.flight, self.prompts = llm, cache, flight, prompts
 
     def suggest(self, highlights):
         highlights = highlights[:MAX_HIGHLIGHTS]
@@ -72,7 +66,7 @@ class InsightSuggester:
             return {"method": "rules", "suggestions": []}
         payload = [{"id": h["id"], "text": h["text"][:300], "tags": h["tags"]} for h in highlights]
         key = hashlib.sha256(
-            f"{PROMPT_VERSION}|{self.llm.settings.model}|{json.dumps(payload, sort_keys=True)}".encode()
+            f"{PROMPT_VERSION}|{self.llm.fingerprint('insights')}|{json.dumps(payload, sort_keys=True)}".encode()
         ).hexdigest()
         cached = self.cache.get(key)
         if cached is not None:
@@ -84,7 +78,7 @@ class InsightSuggester:
         if cached is not None:
             return cached
         try:
-            data = self.llm.complete_json(SYSTEM_PROMPT, json.dumps(payload))
+            data = self.llm.complete_json("insights", self.prompts.get("insights"), json.dumps(payload))
         except LLMUnavailable as exc:
             return {"method": "rules", "fallbackReason": str(exc), "suggestions": rule_suggestions(highlights)}
         suggestions = validate_llm_suggestions(data.get("insights"), {h["id"] for h in highlights})
@@ -94,6 +88,6 @@ class InsightSuggester:
                 "fallbackReason": "LLM returned no valid insights",
                 "suggestions": rule_suggestions(highlights),
             }
-        result = {"method": "llm", "model": self.llm.settings.model, "suggestions": suggestions}
+        result = {"method": "llm", "model": self.llm.fingerprint("insights"), "suggestions": suggestions}
         self.cache.set(key, result)
         return result

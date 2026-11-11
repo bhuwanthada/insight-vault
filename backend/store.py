@@ -6,7 +6,7 @@ import threading
 
 
 def empty_db():
-    return {"notes": [], "highlights": [], "insights": [], "tickets": [], "reports": []}
+    return {"notes": [], "highlights": [], "insights": [], "tickets": [], "reports": [], "usage": {}, "audit": []}
 
 
 class Store:
