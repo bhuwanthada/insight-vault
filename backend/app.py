@@ -5,6 +5,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
+import redis
 import sqlalchemy as sa
 from flask import Flask, Response, g, jsonify, request, session
 from werkzeug.exceptions import HTTPException
@@ -17,7 +18,6 @@ from .auth import Authenticator, DirectoryResolver, EnvResolver, has_role, is_pu
 from .config import Settings
 from .connectors.repo import ConnectorRepo
 from .connectors.sync import SyncService
-from .limits import RateLimiter
 from .observability import Metrics
 from .runtime import build_runtime
 from .tenancy import QuotaExceeded, Tenants, UnknownOrg
@@ -69,7 +69,7 @@ def export_markdown(db):
     return "\n".join(lines) + "\n"
 
 
-def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=None, engine=None):
+def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=None, engine=None, shared=None):
     settings = settings or Settings.from_env()
     app = Flask(__name__)
     app.config.update(
@@ -84,16 +84,16 @@ def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=Non
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=settings.trust_proxy, x_proto=settings.trust_proxy, x_host=settings.trust_proxy)
 
     # ---- storage, organizations and credentials (shared with the background worker)
-    rt = build_runtime(settings, clock, data_file or settings.data_file or DEFAULT_DATA_FILE, llm, engine)
+    rt = build_runtime(settings, clock, data_file or settings.data_file or DEFAULT_DATA_FILE, llm, engine, shared)
     settings = rt.settings  # a license may have set the organization id
     multi, factory, directory, box, verifier, tenants = rt.multi, rt.factory, rt.directory, rt.box, rt.verifier, rt.tenants
     repo = ConnectorRepo(rt.engine) if rt.engine is not None else None
     sync_service = SyncService(tenants, repo, box, clock, settings) if repo else None
     app.extensions["insight_vault"] = {"tenants": tenants, "directory": directory, "factory": factory, "verifier": verifier,
-                                       "repo": repo, "sync": sync_service}
+                                       "repo": repo, "sync": sync_service, "shared": rt.shared}
     resolver = DirectoryResolver(directory) if multi else EnvResolver(tenants.context(settings.org_id).settings, settings.org_id)  # includes the license's domains and admins
     authenticator = Authenticator(settings, resolver, verifier, default_org=None if multi else settings.org_id)
-    limiter, llm_limiter = RateLimiter(settings.rate_limit), RateLimiter(settings.rate_limit_llm)
+    limiter, llm_limiter = rt.shared.limiter("general", settings.rate_limit), rt.shared.limiter("llm", settings.rate_limit_llm)
     allowed_origins = {settings.public_url, *settings.cors_origins}
     platform_metrics = Metrics()
 
@@ -188,8 +188,9 @@ def create_app(data_file=None, settings=None, llm=None, clock=_utcnow, oauth=Non
     def ready():
         try:
             factory.for_org(settings.org_id).check()  # proves the data store is reachable
-        except (OSError, sa.exc.SQLAlchemyError) as exc:
-            return _error(f"data store unavailable: {exc}", 503)
+            rt.shared.check()  # and the shared cache, when one is configured
+        except (OSError, sa.exc.SQLAlchemyError, redis.RedisError) as exc:
+            return _error(f"data store or cache unavailable: {exc}", 503)
         return jsonify({"status": "ready"})
 
     @app.get("/api/config/public")

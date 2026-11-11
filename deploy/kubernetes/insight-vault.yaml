@@ -1,0 +1,168 @@
+# Insight Vault on Kubernetes (any cloud: EKS, GKE, AKS, or your own cluster).
+#
+# Before applying:
+#   1. Build and push the two images, then replace the image names below:
+#        docker build -f Dockerfile.api -t REGISTRY/insight-vault-api:1.0.0 .
+#        docker build -f Dockerfile.web --build-arg BACKEND_URL=http://api:5001 -t REGISTRY/insight-vault-web:1.0.0 .
+#   2. Create the secret from your .env (never commit it):
+#        kubectl create namespace insight-vault
+#        kubectl -n insight-vault create secret generic insight-vault-secrets --from-env-file=.env
+#      It must contain DATABASE_URL, REDIS_URL, SECRETS_KEY and your sign-in / LLM settings.
+#   3. Edit the ConfigMap (PUBLIC_URL, DEPLOYMENT_MODE, ...) and the Ingress host, then:
+#        kubectl apply -f deploy/kubernetes/insight-vault.yaml
+#
+# PostgreSQL and Redis are expected to be managed services (RDS / Cloud SQL / Azure Database for PostgreSQL,
+# ElastiCache / Memorystore / Azure Cache for Redis). The API creates and upgrades the schema on start.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: insight-vault
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: insight-vault-config
+  namespace: insight-vault
+data:
+  HOST: "0.0.0.0"
+  PORT: "5001"
+  DEPLOYMENT_MODE: "multi_tenant"          # or single_org
+  AUTH_MODE: "sso"
+  PUBLIC_URL: "https://insight.example.com"
+  COOKIE_SECURE: "true"
+  TRUST_PROXY: "1"
+  LOG_FORMAT: "json"
+  RATE_LIMIT_PER_MINUTE: "300"
+  RATE_LIMIT_LLM_PER_MINUTE: "30"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: insight-vault
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+        - name: api
+          image: REGISTRY/insight-vault-api:1.0.0
+          ports:
+            - containerPort: 5001
+          envFrom:
+            - configMapRef: {name: insight-vault-config}
+            - secretRef: {name: insight-vault-secrets}
+          readinessProbe:
+            httpGet: {path: /api/ready, port: 5001}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: 5001}
+            periodSeconds: 20
+            initialDelaySeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 768Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: insight-vault
+spec:
+  selector: {app: api}
+  ports:
+    - port: 5001
+      targetPort: 5001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: insight-vault
+spec:
+  replicas: 1          # more copies are safe: each connector is leased while it syncs
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      containers:
+        - name: worker
+          image: REGISTRY/insight-vault-api:1.0.0
+          command: ["python", "-m", "backend.worker"]
+          envFrom:
+            - configMapRef: {name: insight-vault-config}
+            - secretRef: {name: insight-vault-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: insight-vault
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: web
+          image: REGISTRY/insight-vault-web:1.0.0
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet: {path: /, port: 3000}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: insight-vault
+spec:
+  selector: {app: web}
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: insight-vault
+  namespace: insight-vault
+  # Add your controller's annotations here (for example cert-manager, or the AWS / GCE / Azure application gateway ones).
+spec:
+  rules:
+    - host: insight.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: web, port: {number: 80}}
+  tls:
+    - hosts: [insight.example.com]
+      secretName: insight-vault-tls
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: insight-vault
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: api}

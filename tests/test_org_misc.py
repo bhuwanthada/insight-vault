@@ -5,6 +5,7 @@ from backend.app import create_app
 from backend.auth import is_public, required_feature, required_role
 from backend.config import Settings
 from tests.test_multitenant import World, bearer, pair  # noqa: F401  (pair is a fixture)
+from tests.dburl import db_url
 
 
 def test_required_feature_maps_paths_to_plan_features():
@@ -31,7 +32,7 @@ def test_org_endpoints_need_the_right_roles():
 
 
 def test_a_single_company_install_can_use_a_database_and_survives_restarts(tmp_path):
-    url = f"sqlite:///{tmp_path / 'company.db'}"
+    url = db_url(tmp_path, 'company')
     first = create_app(settings=Settings(database_url=url)).test_client()
     first.post("/api/notes", json={"title": "kept", "text": "across restarts"})
     first.post("/api/tickets/sample")

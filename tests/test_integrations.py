@@ -14,6 +14,7 @@ from backend.db import make_engine
 from backend.secrets_box import SecretBox
 from tests.test_connectors import FakeResponse, FakeSession, ZD, ZD_SECRET, zendesk_routes
 from tests.test_multitenant import World, bearer, pair  # noqa: F401  (pair is a fixture)
+from tests.dburl import db_url
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 ZENDESK = {"kind": "zendesk", "name": "Support desk", "config": ZD, "secrets": ZD_SECRET, "intervalMinutes": 30}
@@ -30,7 +31,7 @@ class Clock:
 def build(tmp_path, **settings_kw):
     """A single-company installation on SQLite with a master key, so connectors can be stored."""
     clock = Clock()
-    settings = Settings(database_url=f"sqlite:///{tmp_path / 'c.db'}", secrets_key=secrets_box.generate_key(), **settings_kw)
+    settings = Settings(database_url=db_url(tmp_path, 'c'), secrets_key=secrets_box.generate_key(), **settings_kw)
     app = create_app(settings=settings, clock=clock)
     ext = app.extensions["insight_vault"]
     return app, app.test_client(), ext, clock
@@ -46,7 +47,7 @@ def fake_tool(ext, routes=None):
 # ---------- registry ----------
 @pytest.fixture
 def repo(tmp_path):
-    engine = make_engine(f"sqlite:///{tmp_path / 'r.db'}")
+    engine = make_engine(db_url(tmp_path, 'r'))
     schema.migrate(engine, NOW.isoformat())
     return ConnectorRepo(engine)
 
@@ -184,7 +185,7 @@ def test_unknown_settings_are_dropped_and_names_default_to_the_tool(tmp_path):
 
 
 def test_credentials_cannot_be_stored_without_a_master_key(tmp_path):
-    app = create_app(settings=Settings(database_url=f"sqlite:///{tmp_path / 'nokey.db'}"), clock=Clock())
+    app = create_app(settings=Settings(database_url=db_url(tmp_path, 'nokey')), clock=Clock())
     response = app.test_client().post("/api/connectors", json=ZENDESK)
     assert response.status_code == 503 and "SECRETS_KEY" in response.get_json()["error"]
 
@@ -383,7 +384,7 @@ def test_the_worker_needs_a_database_and_wires_everything_up(tmp_path, monkeypat
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(SystemExit, match="needs DATABASE_URL"):
         worker.main()
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'w.db'}")
+    monkeypatch.setenv("DATABASE_URL", db_url(tmp_path, 'w'))
     monkeypatch.setenv("WORKER_POLL_SECONDS", "3")
     seen = {}
     monkeypatch.setattr(worker, "loop", lambda service, repo, clock, poll, stop, **kw: seen.update(service=service, poll=poll, stop=stop, before=stop()))

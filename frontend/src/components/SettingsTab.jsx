@@ -2,9 +2,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { guarded } from "../guard";
+import Members from "./Members";
+import OrgPanel from "./OrgPanel";
+import OrgSettings from "./OrgSettings";
 
 // Administrator view: LLM connection and usage, recent activity, and the active (masked) settings.
-export default function SettingsTab({ locale }) {
+export default function SettingsTab({ locale, multi }) {
   const [status, setStatus] = useState(null);
   const [settings, setSettings] = useState(null);
   const [audit, setAudit] = useState(null); // null until loaded, so we never flash an empty state
@@ -24,6 +27,9 @@ export default function SettingsTab({ locale }) {
 
   return (
     <>
+      <OrgPanel locale={locale} />
+      {multi && <OrgSettings />}
+      {multi && <Members />}
       <div className="card stack">
         <div className="toolbar">
           <h2 style={{ margin: 0 }}>LLM connection</h2>

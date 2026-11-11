@@ -12,6 +12,7 @@ from backend.store import JsonStore
 from backend.tenancy import (OrgContext, QuotaExceeded, Tenants, UnknownOrg, apply_claims, apply_overrides, coerce,
                              ensure_room, validate_overrides)
 from tests.conftest import FakeLLM
+from tests.dburl import db_url
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 NOW_ISO = NOW.isoformat()
@@ -104,7 +105,7 @@ def test_apply_claims_token_cap_is_the_stricter_of_the_two(pair, env_cap, claim_
 # ---------- directory ----------
 @pytest.fixture
 def directory(tmp_path):
-    engine = make_engine(f"sqlite:///{tmp_path / 'd.db'}")
+    engine = make_engine(db_url(tmp_path, 'd'))
     schema.migrate(engine, NOW_ISO)
     return Directory(engine)
 
@@ -210,7 +211,7 @@ def test_org_name_prefers_the_explicit_setting(tmp_path):
 # ---------- tenants: multi-tenant ----------
 @pytest.fixture
 def multi(tmp_path, pair):
-    engine = make_engine(f"sqlite:///{tmp_path / 'mt.db'}")
+    engine = make_engine(db_url(tmp_path, 'mt'))
     schema.migrate(engine, NOW_ISO)
     directory, box = Directory(engine), SecretBox(secrets_box.generate_key())
     settings = Settings(deployment_mode="multi_tenant", llm_provider="openrouter", llm_model="platform/model", llm_api_key="PLATFORM-KEY")

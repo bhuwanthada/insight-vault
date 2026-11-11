@@ -1,6 +1,6 @@
 {
   "name": "insight-vault",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
   "description": "Local-first research repository: highlight and tag interview quotes, build insights that stay linked to their evidence, and report on support resolutions.",
   "author": "Bhuwan Thada",
@@ -12,7 +12,9 @@
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "node scripts/py.mjs -m pytest",
     "test:frontend": "npm --prefix frontend test",
-    "test:e2e": "node --test --test-concurrency=1 e2e/ui.test.js e2e/sso.test.js"
+    "test:e2e": "node --test --test-concurrency=1 e2e/ui.test.js e2e/sso.test.js e2e/saas.test.js",
+    "llm:check": "node scripts/py.mjs -m backend.smoke",
+    "worker": "node scripts/py.mjs -m backend.worker"
   },
   "devDependencies": {
     "playwright-core": "^1.50.0"

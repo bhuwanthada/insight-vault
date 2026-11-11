@@ -1,6 +1,45 @@
-# Run everything:  npm run setup   (creates .env)   then   docker compose up --build
-# Open http://localhost:3000. Settings come from .env (see .env.example).
+# The whole product on one machine: PostgreSQL, Redis, the API, the background worker and the web UI.
+#
+#   1. npm run setup                (creates .env from .env.example)
+#   2. In .env set POSTGRES_PASSWORD, SECRETS_KEY and (for sign-in) AUTH_MODE and its settings
+#   3. docker compose up --build
+#   4. open http://localhost:3000
+#
+# Settings come from .env (see .env.example). The values under "environment" below override .env on purpose:
+# they point the containers at each other.
+x-app-env: &app-env
+  DATABASE_URL: postgresql://insight:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/insight
+  REDIS_URL: redis://redis:6379/0
+  HOST: 0.0.0.0
+  PORT: "5001"
+  TRUST_PROXY: "1"        # the web container is the only proxy in front of the API
+
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: insight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: insight
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insight -d insight"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # a cache and lock store: nothing precious lives here
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -8,14 +47,29 @@ services:
       args:
         WITH_LITELLM: "${WITH_LITELLM:-false}"
     env_file: .env
-    environment:
-      HOST: 0.0.0.0
-      PORT: "5001"
-      DATA_FILE: /data/db.json
-      TRUST_PROXY: "1"        # the web container is the only proxy in front of the API
-    volumes:
-      - insight-data:/data
-    restart: unless-stopped   # the API is reachable only from the web container; no port is published
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped   # reachable only from the web container; no port is published
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        WITH_LITELLM: "${WITH_LITELLM:-false}"
+    command: ["python", "-m", "backend.worker"]
+    healthcheck:
+      disable: true            # the image's check probes the API port, which the worker does not serve
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      api:
+        condition: service_healthy   # the API creates and upgrades the database schema on start
+    restart: unless-stopped
 
   web:
     build:
@@ -28,4 +82,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  insight-data:
+  pgdata:

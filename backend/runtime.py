@@ -10,6 +10,7 @@ from .directory import Directory
 from .report import load_template
 from .rules import load_rules
 from .secrets_box import SecretBox
+from .shared import Shared
 from .tenancy import Tenants
 from . import schema
 
@@ -24,6 +25,7 @@ class Runtime:
     verifier: object
     tenants: object
     license_claims: object
+    shared: object
 
     @property
     def multi(self):
@@ -47,7 +49,7 @@ def verify_license(settings, verifier):
     return claims
 
 
-def build_runtime(settings, clock, data_file="", llm=None, engine=None):
+def build_runtime(settings, clock, data_file="", llm=None, engine=None, shared=None):
     if engine is None and settings.database_url:
         engine = make_engine(settings.database_url, settings.db_pool_size)
     if engine is not None:
@@ -62,7 +64,8 @@ def build_runtime(settings, clock, data_file="", llm=None, engine=None):
     if license_claims:
         settings = replace(settings, org_id=license_claims["org_id"])  # the license defines the organization
     load_rules(settings.rules_file), load_template(settings.report_template)  # fail at startup, not on the first request
-    tenants = Tenants(settings, factory, directory, box, clock, license_claims, llm)
+    shared = shared or Shared.from_settings(settings)
+    tenants = Tenants(settings, factory, directory, box, clock, license_claims, llm, shared=shared)
     if not multi:
         tenants.context(settings.org_id)  # builds the one organization now, so bad configuration stops startup
-    return Runtime(settings, engine, factory, directory, box, verifier, tenants, license_claims)
+    return Runtime(settings, engine, factory, directory, box, verifier, tenants, license_claims, shared)

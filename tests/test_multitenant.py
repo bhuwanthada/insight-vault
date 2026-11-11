@@ -9,6 +9,7 @@ from backend.config import ConfigError, Settings
 from backend.db import make_engine
 from tests.conftest import FakeLLM
 from tests.test_auth_app import FakeOAuth, sign_in
+from tests.dburl import db_url
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 PLATFORM = {"X-Platform-Key": "p" * 16}
@@ -37,7 +38,7 @@ class World:
             deployment_mode="multi_tenant", auth_mode="sso", secret_key="s" * 32, public_url="http://localhost:3000",
             google_client_id="g", google_client_secret="s", secrets_key=secrets_box.generate_key(),
             org_key_public_key=pair[1], platform_admin_keys=(("ops", "p" * 16),), **over)
-        self.app = create_app(settings=settings, engine=make_engine(f"sqlite:///{tmp_path / 'mt.db'}"), llm=self.llm,
+        self.app = create_app(settings=settings, engine=make_engine(db_url(tmp_path, 'mt')), llm=self.llm,
                               clock=self.clock, oauth=self.idp)
         self.client = self.app.test_client()
         self.internals = self.app.extensions["insight_vault"]

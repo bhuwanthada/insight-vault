@@ -9,6 +9,7 @@ from backend.connectors.jira import adf_text
 from backend.db import make_engine
 from backend.connectors.repo import ConnectorRepo
 from tests.test_connectors import FD, FD_SECRET, SF, ZD, ZD_SECRET, case, drain, make, salesforce_routes, zendesk_routes
+from tests.dburl import db_url
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -55,7 +56,7 @@ def test_freshdesk_without_any_updated_dates_keeps_the_previous_cursor(monkeypat
 
 def test_a_worker_that_loses_a_race_for_one_connector_takes_the_next(tmp_path):
     """Another worker leases the first candidate after this one listed it: this one must move on, not fail."""
-    engine = make_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    engine = make_engine(db_url(tmp_path, 'race'))
     schema.migrate(engine, NOW.isoformat())
     repo = ConnectorRepo(engine)
     ids = [repo.create("acme", "zendesk", f"c{i}", {}, "", {}, 30, True, (NOW - timedelta(minutes=10 - i)).isoformat())["id"] for i in range(2)]

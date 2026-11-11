@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { guarded } from "../guard";
 import InsightsTab from "./InsightsTab";
+import IntegrationsTab from "./IntegrationsTab";
 import NoteForm from "./NoteForm";
 import NoteViewer from "./NoteViewer";
 import SearchTab from "./SearchTab";
@@ -15,7 +16,10 @@ const APPROVER_ROLES = ["approver", "admin"];
 
 export default function Workspace({ config, user, theme, onToggleTheme }) {
   const tabs = TABS.filter(([, , feature]) => config.features.includes(feature)).map(([id, label]) => [id, label]);
-  if (user.role === "admin") tabs.push(["settings", "Settings"]);
+  if (user.role === "admin") {
+    if (config.features.includes("integrations")) tabs.push(["integrations", "Integrations"]);
+    tabs.push(["settings", "Settings"]);
+  }
 
   const [tab, setTab] = useState("notes");
   const [data, setData] = useState({ notes: [], highlights: [], insights: [] });
@@ -48,6 +52,10 @@ export default function Workspace({ config, user, theme, onToggleTheme }) {
     setTab("notes");
     setNoteId(id);
   };
+  const switchOrg = guarded(async (e) => {
+    await api("org/switch", "POST", { org: e.target.value });
+    window.location.reload();
+  });
   const signOut = guarded(async () => {
     await api("auth/logout", "POST", {});
     window.location.reload();
@@ -64,6 +72,11 @@ export default function Workspace({ config, user, theme, onToggleTheme }) {
         </nav>
         <span className="muted" style={{ marginLeft: "auto" }}>Your data stays on this machine.</span>
         {llm && <span className="badge" id="llm-badge">{llm.enabled ? `LLM: ${llm.provider}:${llm.model}` : "LLM off: rules only"}</span>}
+        {user.orgs && user.orgs.length > 1 && (
+          <select aria-label="Organization" value={user.org} onChange={switchOrg}>
+            {user.orgs.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
         <button aria-label={`Switch theme (now ${theme})`} onClick={onToggleTheme}>Theme: {theme}</button>
         {config.authMode !== "none" && (
           <span className="badge" id="user-chip">{user.name} ({user.role}) <button className="link" onClick={signOut}>Sign out</button></span>
@@ -105,9 +118,11 @@ export default function Workspace({ config, user, theme, onToggleTheme }) {
             locale={config.locale}
             canDecide={APPROVER_ROLES.includes(user.role)}
             askReviewer={config.authMode === "none"}
+            canImport={config.features.includes("integrations") && user.role !== "viewer"}
           />
         )}
-        {tab === "settings" && <SettingsTab locale={config.locale} />}
+        {tab === "integrations" && <IntegrationsTab locale={config.locale} />}
+        {tab === "settings" && <SettingsTab locale={config.locale} multi={config.deploymentMode === "multi_tenant"} />}
       </main>
     </>
   );

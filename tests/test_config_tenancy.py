@@ -45,3 +45,11 @@ def test_provider_specific_key_variables_are_used_when_llm_api_key_is_empty():
     explicit = {"LLM_PROVIDER": "groq", "LLM_MODEL": "m", "GROQ_API_KEY": "gk", "LLM_API_KEY": "explicit"}
     assert Settings.from_env(explicit).llm_api_key == "explicit"
     assert Settings.from_env({"LLM_PROVIDER": "litellm", "LLM_MODEL": "m", "GROQ_API_KEY": "gk"}).llm_api_key == ""
+
+
+def test_multi_tenant_sso_needs_no_global_allow_list_because_members_come_from_the_database():
+    base = {"AUTH_MODE": "sso", "SECRET_KEY": "s" * 32, "GOOGLE_CLIENT_ID": "g", "GOOGLE_CLIENT_SECRET": "s"}
+    with pytest.raises(ConfigError, match="requires ALLOWED_EMAILS or ALLOWED_DOMAINS"):
+        Settings.from_env(base)  # a single company still needs one: access is denied by default
+    multi = {**base, "DEPLOYMENT_MODE": "multi_tenant", "DATABASE_URL": "sqlite:///x.db", "SECRETS_KEY": generate_key(), "ORG_KEY_PUBLIC_KEY": "pem"}
+    assert Settings.from_env(multi).deployment_mode == "multi_tenant"

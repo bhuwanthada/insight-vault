@@ -9,6 +9,7 @@ from .observability import Metrics
 from .prompts import Prompts
 from .report import load_template
 from .resilience import SingleFlight, TTLCache
+from .shared import Shared
 from .rules import load_rules, load_rules_text
 
 
@@ -27,14 +28,15 @@ class Services:
     metrics: Metrics
 
 
-def build_services(settings, store, llm=None, rules_text=None, template_text=None):
+def build_services(settings, store, llm=None, rules_text=None, template_text=None, shared=None):
     """Build the services for one organization. ``rules_text`` / ``template_text`` are that
     organization's own overrides (stored in its settings); otherwise the configured files are used."""
     rules = load_rules_text(rules_text, "your organization rules") if rules_text else load_rules(settings.rules_file)
     prompts = Prompts(settings.prompt_dir, settings.output_language)
     usage = UsageTracker(store, settings.daily_token_cap)
     llm = llm or LLMClient(settings, usage=usage)
-    cache, flight = TTLCache(settings.cache_size, settings.cache_ttl), SingleFlight()
+    shared = shared or Shared()  # in-memory unless REDIS_URL shares them across processes
+    cache, flight = shared.cache(store.org_id, settings), shared.flight(store.org_id)
     return Services(
         settings, llm, cache, flight,
         Classifier(llm, cache, flight, settings, rules, prompts),

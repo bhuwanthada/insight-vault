@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import Activate from "./Activate";
 
 const MESSAGES = {
   denied: "Your account is not allowed to use this workspace. Ask an administrator to add your e-mail address.",
@@ -29,6 +30,7 @@ export default function Login({ config }) {
         {info && info.providers.map((p) => (
           <a key={p.id} className="btn primary-link" href={`/api/auth/login/${p.id}`}>Sign in with {p.label}</a>
         ))}
+        {config.deploymentMode === "multi_tenant" && <Activate />}
       </div>
     </main>
   );

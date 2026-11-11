@@ -266,6 +266,13 @@ test("18. settings tab: LLM connection, usage and masked settings", async () => 
   assert.equal(config.AUTH_MODE, "none");
 });
 
+test("18b. integrations explain that a database is needed when running on the JSON file", async () => {
+  await page.getByRole("button", { name: "Integrations" }).click();
+  await page.locator(".alert").getByText(/Integrations need a database/).waitFor();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("#org-panel").getByText("self-hosted (single company)").waitFor();
+});
+
 test("19. theme toggle switches and remembers the choice", async () => {
   const button = page.getByRole("button", { name: /Switch theme/ });
   await button.click();

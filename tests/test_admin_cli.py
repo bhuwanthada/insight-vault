@@ -9,6 +9,7 @@ import pytest
 from backend import admin, orgkeys
 from backend.config import Settings
 from backend.llm import HTTPProvider, RateLimited, Target
+from tests.dburl import db_url
 
 
 def run(*argv):
@@ -73,7 +74,7 @@ def test_secrets_key_prints_a_usable_key():
 def test_migrate_needs_a_database_and_is_idempotent(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert run("migrate")[0] == 1 and "DATABASE_URL is not set" in capsys.readouterr().err
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'm.db'}")
+    monkeypatch.setenv("DATABASE_URL", db_url(tmp_path, 'm'))
     assert "applied migrations: [1]" in run("migrate")[1]
     assert "already up to date" in run("migrate")[1]
 

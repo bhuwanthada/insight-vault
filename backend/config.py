@@ -316,7 +316,8 @@ class Settings:
                 out.append("AUTH_MODE=sso requires SECRET_KEY of at least 32 characters")
             if not self.sso_providers():
                 out.append("AUTH_MODE=sso requires at least one provider with a client id and secret")
-            if not self.allowed_emails and not self.allowed_domains:
+            # In multi_tenant mode each organization's member list decides who may sign in, so no global list is needed.
+            if self.deployment_mode == "single_org" and not self.allowed_emails and not self.allowed_domains:
                 out.append("AUTH_MODE=sso requires ALLOWED_EMAILS or ALLOWED_DOMAINS (access is denied by default)")
             if self.microsoft_client_id and self.microsoft_tenant.lower() in PERSONAL_TENANTS:
                 out.append("MICROSOFT_TENANT must be your own tenant id or domain, not common/organizations/consumers")

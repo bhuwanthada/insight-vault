@@ -47,6 +47,23 @@ export function fakeBackend(seed = {}) {
     llm: { enabled: false, provider: "none", model: null, fallbacks: [], circuits: {}, piiMasking: false, usage: { date: "2026-01-01", tokens: 0, calls: 0, cap: 0 } },
     settings: { llm_provider: "none", features: ["notes"], port: 5001, cookie_secure: false, llm_api_key: "not set", data_file: "" },
     audit: [], llmTest: { ok: true, provider: "litellm", model: "m", latencyMs: 12 },
+    org: {
+      id: "default", name: "Insight Vault", plan: "self-hosted", status: "active", deploymentMode: "single_org",
+      features: ["notes", "insights"], quotas: {}, usage: { tickets: 3, seats: null, tokensToday: 12, connectors: 0 }, expiresAt: null, readOnly: false,
+    },
+    orgSettings: {
+      overrides: { app_name: "Acme" }, hasLlmKey: false, editable: [],
+      effective: { app_name: "Acme", accent_color: "#4f46e5", output_language: "English", llm_provider: "none", llm_model: "", llm_base_url: "" },
+    },
+    members: [{ email: "boss@acme.com", role: "admin" }],
+    kinds: [
+      { kind: "zendesk", label: "Zendesk", config: [{ name: "subdomain", label: "Subdomain", required: true }, { name: "email", label: "E-mail", required: true }],
+        secrets: [{ name: "api_token", label: "API token", required: true }] },
+      { kind: "jira", label: "Jira Service Management", config: [{ name: "site", label: "Site", required: false }], secrets: [{ name: "api_token", label: "Token", required: false }] },
+    ],
+    connectors: [], noDatabase: false,
+    testResult: { ok: true, detail: "Connected to acme.zendesk.com" }, syncResult: { status: "ok", error: null, fetched: 5, more: false },
+    importResult: { imported: 2, skipped: 0, skippedRows: [] }, activateResult: { created: true, org: { name: "Acme", plan: "growth" }, admins: ["boss@acme.com"] },
     ...seed,
   };
   let counter = 0;
@@ -102,6 +119,44 @@ export function fakeBackend(seed = {}) {
       const q = decodeURIComponent(path.slice(9));
       return db.notes.filter((n) => n.text.toLowerCase().includes(q)).map((n) => ({ type: "note", noteId: n.id, title: n.title, snippet: n.text.slice(0, 40) }));
     }
+    if (key === "GET org") return db.org;
+    if (key === "GET org/settings") return db.orgSettings;
+    if (key === "PUT org/settings") {
+      if (db.failOrgSettings) return fail("settings rejected");
+      db.orgSettings = { ...db.orgSettings, overrides: body };
+      return { ok: true };
+    }
+    if (key === "PUT org/secrets") {
+      db.orgSettings = { ...db.orgSettings, hasLlmKey: Boolean(body.llm_api_key) };
+      return { llm_api_key: body.llm_api_key ? "set" : "not set" };
+    }
+    if (key === "GET org/members") return db.members;
+    if (key === "POST org/members") {
+      if (db.failMember) return fail("seat limit reached");
+      db.members = [...db.members, body];
+      return body;
+    }
+    if ((m = path.match(/^org\/members\/(.+)$/)) && method === "DELETE") {
+      db.members = db.members.filter((x) => x.email !== decodeURIComponent(m[1]));
+      return { ok: true };
+    }
+    if (key === "POST org/switch") return { ok: true, org: body.org };
+    if (key === "POST org/activate") return db.activateResult === "fail" ? fail("invalid key: bad_signature") : db.activateResult;
+    if (key === "GET connectors") return db.noDatabase ? fail("Integrations need a database: set DATABASE_URL") : { kinds: db.kinds, connectors: db.connectors };
+    if (key === "POST connectors") {
+      if (db.failConnector) return fail("subdomain may only contain letters, digits and hyphens");
+      const created = { id: `c${++counter}`, kind: body.kind, name: body.name || body.kind, config: body.config, interval_minutes: body.intervalMinutes, enabled: true,
+                         last_sync_at: null, last_status: null, last_error: null, last_count: 0 };
+      db.connectors = [...db.connectors, created];
+      db.lastConnectorBody = body;
+      return created;
+    }
+    if ((m = path.match(/^connectors\/([^/]+)\/(test|sync)$/))) return m[2] === "test" ? db.testResult : db.syncResult;
+    if ((m = path.match(/^connectors\/([^/]+)$/)) && method === "DELETE") {
+      db.connectors = db.connectors.filter((c) => c.id !== m[1]);
+      return { ok: true };
+    }
+    if (key === "POST tickets/import") return db.importFails ? fail("could not find a column for: subject") : db.importResult;
     return undefined;
   };
   return { db, route };

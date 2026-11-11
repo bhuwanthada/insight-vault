@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import CsvImport from "./CsvImport";
 
 const STATUS_LABEL = { draft: "Draft", pending_approval: "Pending approval", approved: "Approved", rejected: "Rejected" };
 
@@ -15,7 +16,7 @@ function Bar({ share }) {
 }
 
 // "What issues did we diagnose in the last X days, and how did agents fix them?"
-export default function SupportTab({ windows, defaultDays, locale, canDecide, askReviewer }) {
+export default function SupportTab({ windows, defaultDays, locale, canDecide, askReviewer, canImport }) {
   const [days, setDays] = useState(defaultDays);
   const [report, setReport] = useState(null);
   const [docs, setDocs] = useState([]);
@@ -98,6 +99,8 @@ export default function SupportTab({ windows, defaultDays, locale, canDecide, as
           <div className="muted">{report.lowConfidence} ticket(s) could not be diagnosed with confidence (AI unavailable or ambiguous).</div>
         )}
       </div>
+
+      {canImport && <CsvImport onImported={loadReport} />}
 
       <div className="card stack">
         <h2>Documents and approval (mock workflow, nothing is sent)</h2>

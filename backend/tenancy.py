@@ -139,9 +139,9 @@ def apply_claims(settings, claims):
 
 
 class Tenants:
-    def __init__(self, platform, factory, directory, box, clock, license_claims=None, llm=None, ttl=30.0):
+    def __init__(self, platform, factory, directory, box, clock, license_claims=None, llm=None, ttl=30.0, shared=None):
         self.platform, self.factory, self.directory, self.box = platform, factory, directory, box
-        self.clock, self.license_claims, self.llm = clock, license_claims, llm
+        self.clock, self.license_claims, self.llm, self.shared = clock, license_claims, llm, shared
         self._cache, self._flight = TTLCache(256, ttl), SingleFlight()
 
     @property
@@ -168,7 +168,7 @@ class Tenants:
 
     def _services(self, settings, store, overrides):
         return build_services(settings, store, llm=self.llm, rules_text=overrides.get("rules_yaml"),
-                              template_text=overrides.get("report_template_text"))
+                              template_text=overrides.get("report_template_text"), shared=self.shared)
 
     def _build_single(self, org_id):
         if org_id != self.platform.org_id:
