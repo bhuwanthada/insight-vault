@@ -64,19 +64,21 @@ def register_routes(app, settings, authenticator, oauth, audit):
         if provider in VERIFIED_EMAIL_REQUIRED and str(info.get("email_verified")).lower() != "true":
             audit(email or "anonymous", "login_denied", f"{provider}: e-mail not verified")
             return fail("denied")
-        if not email or not authenticator.policy.allowed(email):
+        memberships = authenticator.resolver.memberships(email) if email else []
+        if not memberships:
             audit(email or "anonymous", "login_denied", f"{provider}: not allowed")
             return fail("denied")
         session.clear()  # fresh session on login (prevents session fixation)
         session["user"] = {"email": email, "name": str(info.get("name") or email), "provider": provider}
+        session["org"] = memberships[0]["org"]
         session.permanent = True
-        audit(email, "login", provider)
+        audit(email, "login", provider, org_id=memberships[0]["org"])
         return redirect(home)
 
     @app.post("/api/auth/logout")
     def logout():
-        user = session.get("user")
+        user, org = session.get("user"), session.get("org")
         session.clear()
         if user:
-            audit(user["email"], "logout", user["provider"])
+            audit(user["email"], "logout", user["provider"], org_id=org)
         return jsonify({"ok": True})

@@ -12,7 +12,7 @@ from backend import llm as llm_module
 from backend.config import Settings
 from backend.llm import (Completion, HTTPProvider, LiteLLMProvider, LLMClient, LLMUnavailable, Target, UsageTracker,
                          build_provider, parse_json_object)
-from backend.store import Store
+from backend.store import JsonStore
 from tests.conftest import completion_returning
 
 
@@ -110,7 +110,7 @@ def test_build_provider_variants():
 # ---------- usage tracker ----------
 def test_usage_tracker_counts_caps_and_trims_history(tmp_path):
     day = {"now": datetime(2026, 1, 1, tzinfo=timezone.utc)}
-    usage = UsageTracker(Store(str(tmp_path / "u.json")), cap=10, clock=lambda: day["now"])
+    usage = UsageTracker(JsonStore(str(tmp_path / "u.json")), cap=10, clock=lambda: day["now"])
     assert usage.snapshot() == {"date": "2026-01-01", "tokens": 0, "calls": 0, "cap": 10} and not usage.exhausted()
     usage.record(6)
     usage.record(4)
@@ -120,7 +120,7 @@ def test_usage_tracker_counts_caps_and_trims_history(tmp_path):
     for i in range(40):
         day["now"] = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=10 + i)
         usage.record(1)
-    assert len(usage.store.load()["usage"]) <= 30
+    assert len(usage.store.kv_get("usage")) <= 30
     assert not UsageTracker(usage.store, cap=0).exhausted()  # 0 means unlimited
 
 
@@ -160,7 +160,7 @@ def test_disabled_client_refuses_calls():
 
 def test_success_records_tokens_and_uses_default_temperature(tmp_path):
     provider = FakeProvider('{"v": 1}', tokens=12)
-    usage = UsageTracker(Store(str(tmp_path / "u.json")), cap=0)
+    usage = UsageTracker(JsonStore(str(tmp_path / "u.json")), cap=0)
     c, _ = client(providers={"litellm": provider}, usage=usage)
     assert c.complete_json("classify", "sys", "usr") == {"v": 1}
     assert provider.calls[0][2] == 0.2  # settings.temperature
@@ -200,7 +200,7 @@ def test_circuit_breaker_skips_a_failing_model():
 
 
 def test_daily_token_cap_blocks_calls(tmp_path):
-    usage = UsageTracker(Store(str(tmp_path / "u.json")), cap=5)
+    usage = UsageTracker(JsonStore(str(tmp_path / "u.json")), cap=5)
     c, _ = client(Settings(llm_provider="litellm", llm_model="m", daily_token_cap=5),
                   {"litellm": FakeProvider("{}", tokens=5)}, usage)
     c.complete_json("t", "s", "u")

@@ -5,7 +5,7 @@ from flask import Flask, redirect
 
 from backend import app as app_module
 from backend import sso
-from backend.auth import AccessPolicy, Authenticator, has_role, is_public, local_user, required_role
+from backend.auth import AccessPolicy, Authenticator, EnvResolver, has_role, is_public, local_user, required_role
 from backend.config import Settings
 from tests.conftest import FakeLLM
 
@@ -47,16 +47,22 @@ def test_access_policy_is_deny_by_default():
     assert [p.role(e) for e in ("boss@corp.com", "lead@corp.com", "ed@corp.com", "new@corp.com")] == ["admin", "approver", "editor", "viewer"]
 
 
+def make_auth(settings, org="default"):
+    return Authenticator(settings, EnvResolver(settings, org), default_org=org)
+
+
 def test_authenticator_modes():
-    assert Authenticator(Settings()).authenticate({}, {})["role"] == "admin"  # none: single local user
-    keys = Authenticator(Settings(**APIKEY))
-    assert keys.authenticate(HEAD(KEY_EDITOR), {})["name"] == "bot"
+    assert make_auth(Settings()).authenticate({}, {})["role"] == "admin"  # none: single local user
+    assert make_auth(Settings()).authenticate({}, {})["org"] == "default"
+    keys = make_auth(Settings(**APIKEY))
+    assert keys.authenticate(HEAD(KEY_EDITOR), {})["name"] == "bot" and keys.authenticate(HEAD(KEY_EDITOR), {})["org"] == "default"
     assert keys.authenticate({"X-API-Key": KEY_VIEWER}, {})["role"] == "viewer"
     assert keys.authenticate({}, {}) is None and keys.authenticate(HEAD("wrong" * 4), {}) is None
     assert keys.authenticate({}, {"user": {"email": "boss@corp.com"}}) is None  # sessions are ignored outside sso mode
-    sso_auth = Authenticator(Settings(**SSO))
+    sso_auth = make_auth(Settings(**SSO), "acme")
     stored = {"email": "lead@corp.com", "name": "Lead", "provider": "google", "role": "admin"}  # a stale role in the cookie is ignored
-    assert sso_auth.authenticate({}, {"user": stored})["role"] == "approver"
+    user = sso_auth.authenticate({}, {"user": stored})
+    assert user["role"] == "approver" and user["org"] == "acme" and user["orgs"] == ["acme"]
     assert sso_auth.authenticate({}, {"user": {"email": "gone@other.com", "name": "G", "provider": "google"}}) is None
     assert sso_auth.authenticate({}, {}) is None
 
@@ -342,7 +348,7 @@ def test_public_and_admin_config_endpoints(make_client):
     c = make_client(settings=s)
     public = c.get("/api/config/public").get_json()
     assert public == {"appName": "Acme", "accentColor": "#112233", "defaultTheme": "dark", "features": ["notes"],
-                      "windows": [3, 9], "defaultDays": 9, "locale": "de-DE", "authMode": "none"}
+                      "windows": [3, 9], "defaultDays": 9, "locale": "de-DE", "authMode": "none", "deploymentMode": "single_org"}
     admin = c.get("/api/config")
     assert admin.get_json()["LLM_API_KEY"] == "set" and b"topsecret" not in admin.data and b"x" * 40 not in admin.data
 
@@ -350,7 +356,7 @@ def test_public_and_admin_config_endpoints(make_client):
 def test_ready_reports_store_problems(make_client, monkeypatch):
     c = make_client()
     assert c.get("/api/ready").get_json() == {"status": "ready"}
-    monkeypatch.setattr(app_module.Store, "save", lambda self, db: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr("backend.store.JsonStore.check", lambda self: (_ for _ in ()).throw(OSError("disk full")))
     bad = c.get("/api/ready")
     assert bad.status_code == 503 and "disk full" in bad.get_json()["error"]
 

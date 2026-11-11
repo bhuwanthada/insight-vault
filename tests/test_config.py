@@ -11,7 +11,7 @@ GOOD_SSO = {
 def test_defaults_need_no_environment():
     s = Settings.from_env({})
     assert (s.llm_provider, s.llm_enabled, s.auth_mode, s.port, s.default_days) == ("none", False, "none", 5001, 30)
-    assert s.features == ("notes", "insights", "search", "support", "ai_suggestions")
+    assert s.features == ("notes", "insights", "search", "support", "ai_suggestions", "integrations")
 
 
 def test_reads_process_environment_by_default(monkeypatch):

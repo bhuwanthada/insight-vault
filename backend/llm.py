@@ -24,10 +24,20 @@ from .resilience import CircuitBreaker
 log = logging.getLogger("insight_vault.llm")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
+GROQ_URL = "https://api.groq.com/openai/v1"
+MAX_RETRY_AFTER = 30.0  # never sleep longer than this because a provider asked us to
 
 
 class LLMUnavailable(Exception):
     """The LLM is not configured, failing, or over budget."""
+
+
+class RateLimited(RuntimeError):
+    """The provider answered 429. ``retry_after`` is how long it asked us to wait, in seconds (or None)."""
+
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,8 @@ class LiteLLMProvider:
             request["api_key"] = self.settings.llm_api_key
         if self.settings.llm_base_url:
             request["api_base"] = self.settings.llm_base_url
+        if self.settings.llm_json_mode:
+            request["response_format"] = {"type": "json_object"}
         response = self._completion(**request)
         usage = getattr(response, "usage", None)
         return Completion(response.choices[0].message.content, int(getattr(usage, "total_tokens", 0) or 0))
@@ -86,13 +98,18 @@ class HTTPProvider:
         headers = {"Content-Type": "application/json", **self.extra_headers}
         if self.settings.llm_api_key:
             headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
-        body = json.dumps({"model": target.model, "messages": messages, "temperature": temperature,
-                           "max_tokens": max_tokens}).encode()
+        payload_out = {"model": target.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+        if self.settings.llm_json_mode:
+            payload_out["response_format"] = {"type": "json_object"}
+        body = json.dumps(payload_out).encode()
         request = urllib.request.Request(self.base_url + "/chat/completions", data=body, headers=headers, method="POST")
         try:
             with self._open(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                wait = exc.headers.get("Retry-After") if exc.headers else None
+                raise RateLimited(f"HTTP 429 from {self.base_url}", float(wait) if wait and wait.replace(".", "", 1).isdigit() else None) from exc
             raise RuntimeError(f"HTTP {exc.code} from {self.base_url}") from exc
         usage = payload.get("usage") or {}
         return Completion(payload["choices"][0]["message"]["content"], int(usage.get("total_tokens", 0) or 0))
@@ -106,12 +123,14 @@ def build_provider(name, settings):
         if settings.openrouter_referer:
             headers["HTTP-Referer"] = settings.openrouter_referer
         return HTTPProvider(settings, settings.llm_base_url or OPENROUTER_URL, headers)
+    if name == "groq":
+        return HTTPProvider(settings, settings.llm_base_url or GROQ_URL)
     return HTTPProvider(settings, settings.llm_base_url)  # openai_compatible
 
 
 # ---------------------------------------------------------------- token budget
 class UsageTracker:
-    """Daily token counter persisted in the data store, so the cap survives restarts."""
+    """Daily token counter kept in the organization's own store, so the cap survives restarts."""
 
     def __init__(self, store, cap, clock=lambda: datetime.now(timezone.utc)):
         self.store, self.cap, self._clock = store, cap, clock
@@ -120,7 +139,7 @@ class UsageTracker:
         return self._clock().date().isoformat()
 
     def snapshot(self):
-        day = self.store.load()["usage"].get(self._today(), {})
+        day = (self.store.kv_get("usage") or {}).get(self._today(), {})
         return {"date": self._today(), "tokens": day.get("tokens", 0), "calls": day.get("calls", 0), "cap": self.cap}
 
     def exhausted(self):
@@ -128,13 +147,13 @@ class UsageTracker:
 
     def record(self, tokens):
         with self.store.lock:
-            db = self.store.load()
-            day = db["usage"].setdefault(self._today(), {"tokens": 0, "calls": 0})
+            usage = self.store.kv_get("usage") or {}
+            day = usage.setdefault(self._today(), {"tokens": 0, "calls": 0})
             day["tokens"] += tokens
             day["calls"] += 1
-            for old in sorted(db["usage"])[:-30]:  # keep a month of history
-                del db["usage"][old]
-            self.store.save(db)
+            for old in sorted(usage)[:-30]:  # keep a month of history
+                del usage[old]
+            self.store.kv_set("usage", usage)
 
 
 # ---------------------------------------------------------------- client
@@ -196,7 +215,8 @@ class LLMClient:
                 last = exc
                 log.warning("LLM %s attempt %d failed: %s", target.label, attempt + 1, exc)
                 if attempt < retries:
-                    self._sleep(min(8.0, 0.5 * 2**attempt) * (0.5 + self._rng()))
+                    asked = getattr(exc, "retry_after", None)  # honour the provider's own Retry-After when it sent one
+                    self._sleep(min(asked, MAX_RETRY_AFTER) if asked is not None else min(8.0, 0.5 * 2**attempt) * (0.5 + self._rng()))
             else:
                 self.stats["tokens"] += done.tokens
                 if self._usage:

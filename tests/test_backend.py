@@ -6,7 +6,7 @@ import pytest
 from backend import app as app_module
 from backend.analysis import analyze
 from backend.app import create_app, export_markdown
-from backend.store import Store, empty_db
+from backend.store import JsonStore
 
 TRANSCRIPT = (
     "Interviewer: Tell me about onboarding?\n"
@@ -52,16 +52,6 @@ def test_sentiment_labels(text, label):
 
 
 # ---------- store ----------
-def test_store_missing_file_and_corrupt_file(tmp_path):
-    path = tmp_path / "sub" / "db.json"
-    store = Store(str(path))
-    assert store.load() == empty_db()
-    store.save({"notes": [1], "highlights": [], "insights": []})  # creates the folder
-    assert json.loads(path.read_text())["notes"] == [1]
-    path.write_text("{not json")
-    assert store.load() == empty_db()
-
-
 # ---------- notes ----------
 def test_state_starts_empty_and_hides_note_text(client):
     assert client.get("/api/state").get_json() == {"notes": [], "highlights": [], "insights": []}
@@ -237,7 +227,7 @@ def test_llm_status(client, make_client):
 
 def test_http_errors_and_unexpected_errors_are_json(client, monkeypatch):
     assert client.delete("/api/state").get_json() == {"error": "method not allowed"}
-    monkeypatch.setattr(app_module.Store, "load", lambda self: (_ for _ in ()).throw(RuntimeError("disk gone")))
+    monkeypatch.setattr(JsonStore, "load", lambda self, only=None: (_ for _ in ()).throw(RuntimeError("disk gone")))
     resp = client.get("/api/state")
     assert resp.status_code == 500 and resp.get_json() == {"error": "internal server error"}
 

@@ -7,14 +7,18 @@ import os
 import re
 from dataclasses import dataclass, fields
 
-LLM_PROVIDERS = ("litellm", "openrouter", "openai_compatible", "none")
+from . import secrets_box
+
+LLM_PROVIDERS = ("litellm", "openrouter", "groq", "openai_compatible", "none")
+DEPLOYMENT_MODES = ("single_org", "multi_tenant")
 ROLES = ("viewer", "editor", "approver", "admin")
 AUTH_MODES = ("none", "apikey", "sso")
 THEMES = ("system", "light", "dark")
 LOG_FORMATS = ("text", "json")
-FEATURES = ("notes", "insights", "search", "support", "ai_suggestions")
+FEATURES = ("notes", "insights", "search", "support", "ai_suggestions", "integrations")
 SECRET_FIELDS = {"llm_api_key", "secret_key", "api_keys", "google_client_secret", "linkedin_client_secret",
-                 "microsoft_client_secret", "oidc_client_secret"}
+                 "microsoft_client_secret", "oidc_client_secret", "secrets_key", "platform_admin_keys", "database_url",
+                 "redis_url", "license_key", "org_key_public_key"}
 # A setting's environment variable is its field name upper-cased, except for these.
 ENV_OVERRIDES = {
     "temperature": "LLM_TEMPERATURE", "vote_temperature": "LLM_VOTE_TEMPERATURE", "max_tokens": "LLM_MAX_TOKENS",
@@ -36,6 +40,19 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
+    # --- deployment and tenancy ---
+    deployment_mode: str = "single_org"
+    database_url: str = ""  # empty = a single JSON file (local use); otherwise PostgreSQL (or SQLite for development)
+    db_pool_size: int = 10
+    org_id: str = "default"  # the organization id in single_org mode
+    org_name: str = ""
+    license_key: str = ""  # single_org: a signed key from the vendor that defines this installation
+    license_required: bool = False
+    org_key_public_key: str = ""  # PEM public key that verifies org keys (the vendor keeps the private half)
+    org_key_public_key_file: str = ""
+    secrets_key: str = ""  # master key that encrypts stored secrets (per-org LLM keys, connector credentials)
+    platform_admin_keys: tuple = ()  # ((name, key), ...) for the SaaS operator API
+    redis_url: str = ""  # shared cache, locks and rate limits across several processes
     # --- LLM ---
     llm_provider: str = "none"
     llm_model: str = ""
@@ -56,6 +73,7 @@ class Settings:
     breaker_reset: float = 30.0
     daily_token_cap: int = 0  # 0 = unlimited
     pii_masking: bool = False
+    llm_json_mode: bool = False  # ask the provider for strict JSON output (supported by many, not all, models)
     prompt_dir: str = ""
     output_language: str = "English"
     openrouter_referer: str = ""
@@ -138,10 +156,23 @@ class Settings:
         explicit_provider = r.text("LLM_PROVIDER").lower()
         model = r.text("LLM_MODEL")
         provider = r.choice("LLM_PROVIDER", explicit_provider or ("litellm" if model else "none"), LLM_PROVIDERS)
+        provider_key = {"groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY"}.get(provider)
         settings = cls(
+            deployment_mode=r.choice("DEPLOYMENT_MODE", cls.deployment_mode, DEPLOYMENT_MODES),
+            database_url=r.text("DATABASE_URL"),
+            db_pool_size=r.number("DB_POOL_SIZE", cls.db_pool_size, int, 1, 200),
+            org_id=r.text("ORG_ID", cls.org_id),
+            org_name=r.text("ORG_NAME"),
+            license_key=r.text("LICENSE_KEY"),
+            license_required=r.boolean("LICENSE_REQUIRED", cls.license_required),
+            org_key_public_key=r.text("ORG_KEY_PUBLIC_KEY").replace("\\n", "\n"),  # allow "\n" escapes in a one-line .env value
+            org_key_public_key_file=r.text("ORG_KEY_PUBLIC_KEY_FILE"),
+            secrets_key=r.text("SECRETS_KEY"),
+            platform_admin_keys=tuple(r.pairs("PLATFORM_ADMIN_KEYS")),
+            redis_url=r.text("REDIS_URL"),
             llm_provider=provider,
             llm_model=model,
-            llm_api_key=r.text("LLM_API_KEY"),
+            llm_api_key=r.text("LLM_API_KEY") or (r.text(provider_key) if provider_key else ""),
             llm_base_url=r.text("LLM_BASE_URL").rstrip("/"),
             llm_fallbacks=tuple(r.items("LLM_FALLBACKS", lower=False)),
             llm_model_classify=r.text("LLM_MODEL_CLASSIFY"),
@@ -158,6 +189,7 @@ class Settings:
             breaker_reset=r.number("LLM_BREAKER_RESET", cls.breaker_reset, float, 0, 86400),
             daily_token_cap=r.number("LLM_DAILY_TOKEN_CAP", cls.daily_token_cap, int, 0, 10**12),
             pii_masking=r.boolean("LLM_PII_MASKING", cls.pii_masking),
+            llm_json_mode=r.boolean("LLM_JSON_MODE", cls.llm_json_mode),
             prompt_dir=r.text("PROMPT_DIR"),
             output_language=r.text("OUTPUT_LANGUAGE", cls.output_language),
             openrouter_referer=r.text("OPENROUTER_REFERER"),
@@ -245,6 +277,19 @@ class Settings:
             if provider not in LLM_PROVIDERS or provider == "none" or not model:
                 out.append(f"LLM_FALLBACKS entry '{entry}' must look like provider:model (provider is one of "
                            f"{', '.join(p for p in LLM_PROVIDERS if p != 'none')})")
+        if self.deployment_mode == "multi_tenant":
+            for label, present in (("DATABASE_URL", self.database_url), ("SECRETS_KEY", self.secrets_key),
+                                   ("ORG_KEY_PUBLIC_KEY or ORG_KEY_PUBLIC_KEY_FILE", self.org_key_public_key or self.org_key_public_key_file)):
+                if not present:
+                    out.append(f"DEPLOYMENT_MODE=multi_tenant requires {label}")
+            if self.auth_mode == "none":
+                out.append("DEPLOYMENT_MODE=multi_tenant requires AUTH_MODE=sso or apikey (organizations must sign in)")
+        if self.secrets_key and not secrets_box.valid_keys(self.secrets_key):
+            out.append('SECRETS_KEY must be one or more comma-separated keys made with: python -m backend.admin secrets-key')
+        if self.license_required and not self.license_key:
+            out.append("LICENSE_REQUIRED=true requires LICENSE_KEY")
+        if self.license_key and not (self.org_key_public_key or self.org_key_public_key_file):
+            out.append("LICENSE_KEY requires ORG_KEY_PUBLIC_KEY or ORG_KEY_PUBLIC_KEY_FILE to verify it")
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", self.accent_color):
             out.append("ACCENT_COLOR must be a hex color like #4f46e5")
         bad_features = [f for f in self.features if f not in FEATURES]
@@ -329,6 +374,16 @@ class _Reader:
         except ValueError:
             self.errors.append(f"{key}='{raw}' must be comma-separated whole numbers")
             return list(default)
+
+    def pairs(self, key):
+        parsed = []
+        for entry in self.items(key, lower=False):
+            name, _, secret = entry.partition(":")
+            if not name or len(secret) < 16:
+                self.errors.append(f"{key} entry '{name or entry}' must look like name:key (key at least 16 characters)")
+                continue
+            parsed.append((name, secret))
+        return parsed
 
     def api_keys(self, key):
         parsed = []

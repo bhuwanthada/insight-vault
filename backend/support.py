@@ -9,6 +9,7 @@ from flask import g, jsonify, request
 from .llm import LLMUnavailable
 from .classify import extract_fixes
 from .report import build_report, parse_time, render_markdown
+from .tenancy import ensure_room
 
 SAMPLE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "samples", "support_tickets.json")
 
@@ -47,29 +48,29 @@ def register(app, store, services, clock, uid, now_iso):
     def payload():
         return request.get_json(silent=True)
 
-    windows = services.settings.windows
+    def windows():
+        return services.settings.windows  # the CURRENT organization's choices
 
     def window_error():
-        return error(f"days must be one of {list(windows)}", 400)
+        return error(f"days must be one of {list(windows())}", 400)
 
     def window_days():
         days = request.args.get("days", str(services.settings.default_days))
-        return int(days) if days.isdigit() and int(days) in windows else None
+        return int(days) if days.isdigit() and int(days) in windows() else None
 
     def actor():
         return g.user["email"]
 
     def upsert(tickets):
-        """Insert-or-replace by id, so re-posting a ticket never duplicates it."""
+        """Insert-or-replace by id, so re-posting a ticket never duplicates it. Respects the plan's ticket limit."""
         with store.lock:
-            db = store.load()
-            by_id = {t["id"]: t for t in db["tickets"]}
-            by_id.update({t["id"]: t for t in tickets})
-            db["tickets"] = list(by_id.values())
-            store.save(db)
+            ids = [t["id"] for t in tickets]
+            new = len(set(ids) - store.existing_ticket_ids(ids))
+            ensure_room(g.ctx.quotas, "tickets", store.ticket_count(), new)
+            store.upsert_tickets(tickets)
 
     def report_for(days):
-        tickets = store.load()["tickets"]
+        tickets = store.tickets(since=clock() - timedelta(days=days))
         return build_report(tickets, days, clock(), services.classifier.classify,
                             lambda ticket: extract_fixes(ticket, services.rules))
 
@@ -97,7 +98,7 @@ def register(app, store, services, clock, uid, now_iso):
 
     @app.get("/api/tickets")
     def list_tickets():
-        return jsonify(store.load()["tickets"])
+        return jsonify(store.tickets())
 
     @app.post("/api/tickets")
     def add_tickets():
@@ -140,13 +141,13 @@ def register(app, store, services, clock, uid, now_iso):
 
     @app.get("/api/reports")
     def list_reports():
-        return jsonify(store.load()["reports"])
+        return jsonify(store.load(only=("reports",))["reports"])
 
     @app.post("/api/reports")
     def create_report():
         data = payload() or {}
         days = data.get("days", services.settings.default_days)
-        if days not in windows:
+        if days not in windows():
             return window_error()
         report = report_for(days)
         summary, method = narrative(report)
@@ -163,7 +164,7 @@ def register(app, store, services, clock, uid, now_iso):
             "events": [{"at": now_iso(), "type": "created", "actor": actor(), "detail": f"Draft generated ({method} summary)"}],
         }
         with store.lock:
-            db = store.load()
+            db = store.load(only=("reports",))
             db["reports"].append(doc)
             store.save(db)
         return jsonify(doc), 201
@@ -171,7 +172,7 @@ def register(app, store, services, clock, uid, now_iso):
     def transition(report_id, allowed_from, build):
         """Atomic compare-and-set on the report status, so two concurrent actions cannot both win."""
         with store.lock:
-            db = store.load()
+            db = store.load(only=("reports",))
             doc = next((r for r in db["reports"] if r["id"] == report_id), None)
             if doc is None:
                 return error("report not found", 404)

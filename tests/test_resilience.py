@@ -1,7 +1,7 @@
 import threading
 
 from backend.resilience import CircuitBreaker, SingleFlight, TTLCache
-from backend.store import Store
+from backend.store import JsonStore
 
 
 class Clock:
@@ -94,7 +94,7 @@ def test_breaker_opens_half_opens_and_closes():
 
 # ---------- store under contention (Windows: replace fails while a reader has the file open) ----------
 def test_store_survives_concurrent_readers_and_writers(tmp_path):
-    store = Store(str(tmp_path / "db.json"))
+    store = JsonStore(str(tmp_path / "db.json"))
     store.save({"notes": []})
     errors = []
 

@@ -25,9 +25,17 @@ def load_rules(path=""):
     path = path or DEFAULT_RULES_FILE
     try:
         with open(path, encoding="utf-8") as handle:
-            raw = yaml.safe_load(handle)
-    except (OSError, yaml.YAMLError) as exc:
+            return load_rules_text(handle.read(), path)
+    except OSError as exc:
         raise ConfigError(f"Cannot read rules file {path}: {exc}") from exc
+
+
+def load_rules_text(text, source="the rules"):
+    """Parse rules from YAML text (a file's contents, or an organization's own override)."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Cannot read rules file {source}: {exc}") from exc
     problems = []
     categories = raw.get("categories") if isinstance(raw, dict) else None
     if not isinstance(categories, dict) or not categories:
@@ -46,5 +54,5 @@ def load_rules(path=""):
         except (KeyError, TypeError, re.error) as exc:
             problems.append(f"bad action {item!r}: {exc}")
     if problems:
-        raise ConfigError(f"Invalid rules file {path}:\n  - " + "\n  - ".join(problems))
+        raise ConfigError(f"Invalid rules file {source}:\n  - " + "\n  - ".join(problems))
     return Rules(compiled, tuple(actions), str(raw.get("uncategorised") or "Uncategorised"))
