@@ -30,12 +30,14 @@ describe("header and notes list", () => {
   });
 
   it("shows the configured model", async () => {
-    start({ llm: { enabled: true, model: "openrouter/x/y" } });
-    expect(await screen.findByText("LLM: openrouter/x/y")).toBeInTheDocument();
+    const llm = { enabled: true, provider: "openrouter", model: "x/y", fallbacks: [], circuits: {}, piiMasking: false, usage: {} };
+    start({ llm });
+    expect(await screen.findByText("LLM: openrouter:x/y")).toBeInTheDocument();
   });
 
   it("hides the badge when the status call fails", async () => {
-    mockApi((method, path) => (path === "llm/status" ? fail("down") : { notes: [], highlights: [], insights: [] }));
+    const backend = fakeBackend();
+    mockApi((method, path, body) => (path === "llm/status" ? fail("down") : backend.route(method, path, body)));
     render(<App />);
     await screen.findByText("No notes yet.");
     expect(screen.queryByText(/LLM/)).not.toBeInTheDocument();
@@ -316,12 +318,11 @@ describe("search tab", () => {
     let releaseSlow;
     const slow = new Promise((resolve) => { releaseSlow = resolve; });
     const fresh = [{ type: "note", noteId: "n1", title: "Fresh", snippet: "s" }];
-    mockApi((method, path) => {
-      if (path === "llm/status") return { enabled: false, model: null };
-      if (path === "state") return { notes: [], highlights: [], insights: [] };
+    const backend = fakeBackend();
+    mockApi((method, path, body) => {
       if (path === "search?q=a") return slow;
       if (path === "search?q=ab") return fresh;
-      return undefined;
+      return backend.route(method, path, body);
     });
     render(<App />);
     const user = userEvent.setup();

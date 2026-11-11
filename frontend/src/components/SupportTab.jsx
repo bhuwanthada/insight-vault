@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 
-const WINDOWS = [7, 14, 30, 60, 90];
 const STATUS_LABEL = { draft: "Draft", pending_approval: "Pending approval", approved: "Approved", rejected: "Rejected" };
 
 const fail = (e) => window.alert(e.message);
@@ -16,8 +15,8 @@ function Bar({ share }) {
 }
 
 // "What issues did we diagnose in the last X days, and how did agents fix them?"
-export default function SupportTab() {
-  const [days, setDays] = useState(30);
+export default function SupportTab({ windows, defaultDays, locale, canDecide, askReviewer }) {
+  const [days, setDays] = useState(defaultDays);
   const [report, setReport] = useState(null);
   const [docs, setDocs] = useState([]);
   const [reviewer, setReviewer] = useState("");
@@ -54,7 +53,7 @@ export default function SupportTab() {
     await loadDocs();
   });
   const decide = (id, decision) => run(async () => {
-    await api(`reports/${id}/decision`, "POST", { decision, reviewer });
+    await api(`reports/${id}/decision`, "POST", askReviewer ? { decision, reviewer } : { decision });
     await loadDocs();
   });
 
@@ -68,7 +67,7 @@ export default function SupportTab() {
           <label>
             Time window{" "}
             <select aria-label="Time window" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-              {WINDOWS.map((d) => <option key={d} value={d}>Last {d} days</option>)}
+              {windows.map((d) => <option key={d} value={d}>Last {d} days</option>)}
             </select>
           </label>
           <button onClick={loadSample}>Load sample tickets</button>
@@ -102,16 +101,17 @@ export default function SupportTab() {
 
       <div className="card stack">
         <h2>Documents and approval (mock workflow, nothing is sent)</h2>
-        <input placeholder="Reviewer name (needed to approve or reject)" value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
+        {askReviewer && <input placeholder="Reviewer name (needed to approve or reject)" value={reviewer} onChange={(e) => setReviewer(e.target.value)} />}
         {docs.length === 0 && <div className="muted">No documents yet. Generate one from the report above.</div>}
         {docs.map((d) => (
           <div key={d.id} className="quote">
-            <strong>{d.title}</strong> <span className={"status " + d.status}>{STATUS_LABEL[d.status]}</span>
+            <strong>{d.title}</strong> <span className={"status " + d.status}>{STATUS_LABEL[d.status]}</span>{" "}
+            <span className="muted">{new Date(d.createdAt).toLocaleDateString(locale)}</span>
             <div className="muted">{d.events[d.events.length - 1].detail}</div>
             <div className="row">
               <button onClick={() => setOpen(open === d.id ? null : d.id)}>{open === d.id ? "Hide" : "View"}</button>
               {(d.status === "draft" || d.status === "rejected") && <button className="primary" onClick={submit(d.id)}>Send for approval (mock)</button>}
-              {d.status === "pending_approval" && (
+              {d.status === "pending_approval" && canDecide && (
                 <>
                   <button className="primary" onClick={decide(d.id, "approve")}>Approve</button>
                   <button className="danger" onClick={decide(d.id, "reject")}>Reject</button>

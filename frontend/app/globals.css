@@ -1,13 +1,14 @@
 :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e3de; --accent:#4f46e5; --hl:#fde68a; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#161615; --panel:#1f1f1d; --ink:#ecece8; --muted:#9a9a93; --line:#33332f; --accent:#818cf8; --hl:#5c4a0d; }
+  :root:not([data-theme="light"]) { --bg:#161615; --panel:#1f1f1d; --ink:#ecece8; --muted:#9a9a93; --line:#33332f; --hl:#5c4a0d; }
 }
+:root[data-theme="dark"] { --bg:#161615; --panel:#1f1f1d; --ink:#ecece8; --muted:#9a9a93; --line:#33332f; --hl:#5c4a0d; }
 * { box-sizing:border-box; }
 body { margin:0; font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
 a { color:inherit; text-decoration:none; }
 header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
 header h1 { font-size:17px; margin:0; }
-nav { display:flex; gap:4px; }
+nav { display:flex; gap:4px; flex-wrap:wrap; }
 button, input, textarea, .btn { font:inherit; color:inherit; }
 button, .btn { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; display:inline-block; }
 button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -47,3 +48,12 @@ th { color:var(--muted); font-weight:600; font-size:12px; text-transform:upperca
 .status.rejected { background:#dc2626; color:#fff; border-color:#dc2626; }
 .status.pending_approval { background:#d97706; color:#fff; border-color:#d97706; }
 pre.doc { white-space:pre-wrap; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:13px; overflow:auto; }
+.login { display:grid; place-items:center; min-height:80vh; padding:16px; }
+.login .card { width:100%; max-width:420px; }
+.login h1 { margin:0; font-size:22px; }
+.btn.primary-link { background:var(--accent); color:#fff; border-color:var(--accent); text-align:center; }
+.alert { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:6px; padding:8px 12px; }
+.ok { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:6px; padding:8px 12px; }
+button.link { background:none; border:none; padding:0 0 0 6px; color:var(--accent); text-decoration:underline; }
+details summary { cursor:pointer; font-weight:600; }
+tbody th { text-transform:none; font-size:13px; font-weight:600; color:var(--ink); width:34%; }

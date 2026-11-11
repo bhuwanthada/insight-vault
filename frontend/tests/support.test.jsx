@@ -22,7 +22,7 @@ const report = (over = {}) => ({
   categories: [cat()], topActions: [], topTools: [], byAgent: [], ...over,
 });
 const doc = (over = {}) => ({
-  id: "d1", title: "Support report", status: "draft", markdown: "# Report body",
+  id: "d1", title: "Support report", status: "draft", markdown: "# Report body", createdAt: "2026-06-15T12:00:00Z",
   events: [{ at: "t", type: "created", detail: "Draft generated (rules summary)" }], ...over,
 });
 
@@ -54,10 +54,12 @@ function supportBackend(init = {}) {
   return { s, route };
 }
 
-function setup(init) {
+const PROPS = { windows: [7, 14, 30, 60, 90], defaultDays: 30, locale: "en-US", canDecide: true, askReviewer: true };
+
+function setup(init, props = {}) {
   const backend = supportBackend(init);
   const calls = mockApi(backend.route);
-  render(<SupportTab />);
+  render(<SupportTab {...PROPS} {...props} />);
   return { ...backend, calls, user: userEvent.setup() };
 }
 

@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import { api } from "../api";
+import { guarded } from "../guard";
 
 // Filter tagged evidence, tick quotes, and turn them into an insight.
-export default function InsightsTab({ data, reload, openNote }) {
+export default function InsightsTab({ data, reload, openNote, ai }) {
   const [filter, setFilter] = useState(new Set());
   const [picked, setPicked] = useState(new Set());
   const [title, setTitle] = useState("");
@@ -51,10 +52,10 @@ export default function InsightsTab({ data, reload, openNote }) {
     }
   };
 
-  const remove = async (id) => {
+  const remove = guarded(async (id) => {
     await api("insights/" + id, "DELETE");
     reload();
-  };
+  });
 
   return (
     <>
@@ -81,6 +82,7 @@ export default function InsightsTab({ data, reload, openNote }) {
         <button className="primary" onClick={create}>Create insight from selected</button>
       </div>
 
+      {ai && (
       <div className="card stack">
         <h2>AI-suggested insights</h2>
         <button onClick={suggest}>Suggest insights</button>
@@ -98,6 +100,7 @@ export default function InsightsTab({ data, reload, openNote }) {
           </div>
         ))}
       </div>
+      )}
 
       <div className="card stack">
         <h2>Insights ({data.insights.length})</h2>

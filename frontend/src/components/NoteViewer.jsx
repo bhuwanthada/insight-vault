@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { api } from "../api";
+import { guarded } from "../guard";
 import { buildSegments, selectionRange } from "../text";
 import TagPopup from "./TagPopup";
 
@@ -28,16 +29,16 @@ export default function NoteViewer({ note, highlights, analysis, reload, onDelet
     reload();
   };
 
-  const removeNote = async () => {
+  const removeNote = guarded(async () => {
     if (!window.confirm("Delete this note and its highlights?")) return;
     await api("notes/" + note.id, "DELETE");
     onDeleted();
-  };
+  });
 
-  const removeHighlight = async (id) => {
+  const removeHighlight = guarded(async (id) => {
     await api("highlights/" + id, "DELETE");
     reload();
-  };
+  });
 
   return (
     <>
