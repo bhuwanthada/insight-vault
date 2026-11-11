@@ -1,17 +1,18 @@
 {
   "name": "insight-vault",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Local-first research repository: highlight and tag interview quotes, build insights that stay linked to their evidence, and report on support resolutions.",
   "author": "Bhuwan Thada",
   "license": "MIT",
   "scripts": {
-    "setup": "python -m venv .venv && .venv/Scripts/python -m pip install -r requirements-dev.txt && npm --prefix frontend install",
+    "setup": "node scripts/setup.mjs",
+    "setup:litellm": "node scripts/setup.mjs --litellm",
     "start": "node scripts/start.mjs",
     "test": "npm run test:backend && npm run test:frontend",
-    "test:backend": "python -m pytest",
+    "test:backend": "node scripts/py.mjs -m pytest",
     "test:frontend": "npm --prefix frontend test",
-    "test:e2e": "node --test e2e/ui.test.js"
+    "test:e2e": "node --test --test-concurrency=1 e2e/ui.test.js e2e/sso.test.js"
   },
   "devDependencies": {
     "playwright-core": "^1.50.0"

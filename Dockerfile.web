@@ -1,0 +1,17 @@
+# Insight Vault web UI (Next.js). The API address is fixed at build time (it is baked into the proxy rule).
+FROM node:22-slim AS build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+ARG BACKEND_URL=http://api:5001
+ENV BACKEND_URL=$BACKEND_URL
+RUN npm run build
+
+FROM node:22-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app ./
+USER node
+EXPOSE 3000
+CMD ["npm", "start"]

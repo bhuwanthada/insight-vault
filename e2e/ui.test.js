@@ -4,61 +4,36 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawn, execSync } = require("node:child_process");
 const { chromium } = require("playwright-core");
+const stack = require("./stack");
 
-const ROOT = path.join(__dirname, "..");
 const SHOTS = path.join(__dirname, "screenshots");
-const SAMPLE = path.join(ROOT, "samples", "interview-priya.txt");
+const SAMPLE = path.join(stack.ROOT, "samples", "interview-priya.txt");
 const API_PORT = 5801;
 const UI_PORT = 3801;
 const API = `http://127.0.0.1:${API_PORT}`;
 const UI = `http://127.0.0.1:${UI_PORT}`;
 const DATA = path.join(os.tmpdir(), `iv-e2e-${process.pid}.json`);
-const win = process.platform === "win32";
-const PYTHON = process.env.PYTHON || path.join(ROOT, ".venv", win ? "Scripts/python.exe" : "bin/python");
-const BROWSERS = [
-  process.env.BROWSER_PATH,
-  "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-].filter((p) => p && fs.existsSync(p));
 
 let backend, frontend, browser, page;
 const shot = (name) => page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: true });
 
-function kill(child) {
-  if (!child || child.exitCode !== null) return;
-  if (win) execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: "ignore" });
-  else child.kill();
-}
-async function waitFor(url, ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error("timed out waiting for " + url);
-}
-
 test.before(async () => {
-  assert.ok(BROWSERS.length, "No Chrome/Edge found. Set BROWSER_PATH to a Chromium-based browser.");
+  assert.ok(stack.BROWSERS.length, "No Chrome/Edge found. Set BROWSER_PATH to a Chromium-based browser.");
   fs.mkdirSync(SHOTS, { recursive: true });
-  const env = { ...process.env, PORT: String(API_PORT), DATA_FILE: DATA, BACKEND_URL: API, LLM_MODEL: "" };
-  backend = spawn(PYTHON, ["-m", "backend"], { cwd: ROOT, env, stdio: "ignore" });
-  frontend = spawn("npx", ["next", "dev", "-p", String(UI_PORT)], { cwd: path.join(ROOT, "frontend"), env, shell: true, stdio: "ignore" });
-  await waitFor(`${API}/api/health`, 30000);
-  await waitFor(UI, 120000);
-  browser = await chromium.launch({ executablePath: BROWSERS[0] });
+  backend = stack.startApi({ PORT: String(API_PORT), DATA_FILE: DATA, LLM_MODEL: "", AUTH_MODE: "none" });
+  frontend = stack.startUi(UI_PORT, API);
+  await stack.waitFor(`${API}/api/health`, 30000);
+  await stack.waitFor(UI, 120000);
+  browser = await chromium.launch({ executablePath: stack.BROWSERS[0] });
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(30000);
   page.on("pageerror", (e) => { throw new Error("Page JS error: " + e.message); });
 });
 test.after(async () => {
   await browser?.close();
-  kill(frontend);
-  kill(backend);
+  stack.kill(frontend);
+  stack.kill(backend);
   fs.rmSync(DATA, { force: true });
 });
 
@@ -275,7 +250,36 @@ test("17. document generation and mock approval workflow", async () => {
   assert.match(docs[0].events[1].detail, /MOCK/);
 });
 
-test("18. untrusted text is rendered as text, not HTML (XSS)", async () => {
+test("18. settings tab: LLM connection, usage and masked settings", async () => {
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("heading", { name: "LLM connection" }).waitFor();
+  await page.getByText("Fallbacks", { exact: true }).waitFor(); // the status table appears once the data has loaded
+  assert.match(await page.locator("main").innerText(), /Provider\s+none/);
+  await page.getByRole("button", { name: "Test LLM connection" }).click();
+  await page.locator("#llm-test-result").waitFor();
+  assert.match(await page.locator("#llm-test-result").innerText(), /Connection failed: no LLM configured/);
+  await page.getByText(/All active settings/).click();
+  assert.match(await page.locator("details").innerText(), /LLM_MAX_CONCURRENCY\s+4/i);
+  await shot("17-settings");
+  const config = await (await fetch(`${API}/api/config`)).json();
+  assert.equal(config.LLM_API_KEY, "not set"); // secrets are reported as set / not set, never as values
+  assert.equal(config.AUTH_MODE, "none");
+});
+
+test("19. theme toggle switches and remembers the choice", async () => {
+  const button = page.getByRole("button", { name: /Switch theme/ });
+  await button.click();
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-theme")), "light");
+  await button.click();
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-theme")), "dark");
+  await page.reload();
+  await page.getByRole("button", { name: /Switch theme/ }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-theme")), "dark");
+  await page.getByRole("button", { name: /Switch theme/ }).click(); // back to system
+  assert.equal(await page.evaluate(() => document.documentElement.hasAttribute("data-theme")), false);
+});
+
+test("20. untrusted text is rendered as text, not HTML (XSS)", async () => {
   let fired = false;
   const onDialog = (d) => { fired = true; d.dismiss(); };
   page.on("dialog", onDialog);
@@ -293,7 +297,7 @@ test("18. untrusted text is rendered as text, not HTML (XSS)", async () => {
   await shot("14-xss-safe");
 });
 
-test("19. remove highlight, delete insights and note (cascade)", async () => {
+test("21. remove highlight, delete insights and note (cascade)", async () => {
   await page.locator(".item", { hasText: "Interview with Priya" }).click();
   await page.locator("mark.hl").first().waitFor();
   await page.locator(".quote").filter({ hasText: "a tool that keeps data" }).getByRole("button", { name: "remove" }).click();
@@ -313,7 +317,7 @@ test("19. remove highlight, delete insights and note (cascade)", async () => {
   assert.equal((await api("state")).highlights.length, 0, "highlights cascade-deleted with note");
 });
 
-test("20. dark mode contrast and mobile layout", async () => {
+test("22. dark mode contrast and mobile layout", async () => {
   await page.emulateMedia({ colorScheme: "dark" });
   const colors = await page.evaluate(() => ({
     link: getComputedStyle(document.querySelector("header a.btn")).color,

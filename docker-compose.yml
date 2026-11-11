@@ -1,0 +1,31 @@
+# Run everything:  npm run setup   (creates .env)   then   docker compose up --build
+# Open http://localhost:3000. Settings come from .env (see .env.example).
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        WITH_LITELLM: "${WITH_LITELLM:-false}"
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "5001"
+      DATA_FILE: /data/db.json
+      TRUST_PROXY: "1"        # the web container is the only proxy in front of the API
+    volumes:
+      - insight-data:/data
+    restart: unless-stopped   # the API is reachable only from the web container; no port is published
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  insight-data:
